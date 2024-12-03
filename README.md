@@ -1,7 +1,7 @@
 # DP_1_Oficial
 Common Repository for the Data Project 01 2024/2025
 
-<div align=center><img src="https://media.geeksforgeeks.org/wp-content/uploads/20240206103015/Data-Sciecne-Projects.webp" /></div>
+<img src="WhatsApp Image 2024-12-03 at 12.54.45.jpeg" alt="Description of the image" width="300" />
 
 El objetivo de este repositorio es alamacenar todos los archivos que constituyen la solución de nuestro grupo de trabajo al Data Project del Master de Big Data y Cloud impartido en EDEM. En este repositorio encontraremos detalladamente cuales han sido las Data Bases de las cuales hemos bebido y cuales han sido los pasos hasta llegar a nuestra propuesta de solución de este reto.
 
@@ -28,3 +28,7 @@ Ejemplo:
 
 - Estos dos archivos iran dentro de una carpeta que la llamaremos Datos nivel ruido
 - Y se adjuntarán dentro de la la carpeta general de Datos D_Project
+
+<img src="WhatsApp Image 2024-12-03 at 13.00.23.jpeg" alt="Description of the image" width="300" />
+<img src="WhatsApp Image 2024-12-03 at 13.00.48.jpeg" alt="Description of the image" width="300" />
+<img src="WhatsApp Image 2024-12-03 at 13.01.07.jpeg" alt="Description of the image" width="300" />
