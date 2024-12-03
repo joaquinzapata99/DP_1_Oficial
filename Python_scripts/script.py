@@ -1,7 +1,8 @@
 import requests
 import pandas as pd
-import psycopg2
+import pg8000
 from io import StringIO
+from time import sleep 
 
 def descargar_csv(url):
     try:
@@ -16,8 +17,10 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
     conn = None
     cursor = None
     try:
-        # Connect to PostgreSQL with PostGIS extension
-        conn = psycopg2.connect(**db_config)
+      
+        # Conectar a PostgreSQL
+        conn = pg8000.connect(**db_config) 
+
         cursor = conn.cursor()
 
         # Ensure PostGIS extension is enabled
@@ -88,13 +91,15 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         if conn:
             conn.close()
 
+sleep(60)
+
 # Configuración
 URL_CSV = "https://valencia.opendatasoft.com/api/explore/v2.1/catalog/datasets/valenbisi-disponibilitat-valenbisi-dsiponibilidad/exports/csv?lang=en&timezone=Europe%2FBerlin&use_labels=true&delimiter=%3B"
 NOMBRE_TABLA = "valenbisi_disponibilidad"
 CONFIG_DB = {
     "host": "postgres",  # Use service name defined in docker-compose
     "port": 5432,
-    "dbname": "postgres",
+    "database": "postgres",
     "user": "postgres",
     "password": "postgres",
 }
