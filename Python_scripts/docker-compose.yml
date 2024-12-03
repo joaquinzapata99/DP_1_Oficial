@@ -1,6 +1,7 @@
+version: "3.9"
 services:
   postgres:
-    image: postgres:12.1
+    image: postgis/postgis:12-3.1  # Official PostGIS image based on PostgreSQL 12
     container_name: postgres_container
     environment:
       POSTGRES_USER: postgres
@@ -10,18 +11,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  python-script:
-    build:
-      context: ./script  # Correct directory for the Dockerfile
-    depends_on:
-      - postgres
-    environment:
-      - WAIT_HOSTS=postgres:5432
-    volumes:
-      - ./script:/app  # Mount the 'script' folder correctly
-    command: ["python", "script.py"]  # Ensure this matches the script name
-
+      - ./init_postgis.sql:/docker-entrypoint-initdb.d/init_postgis.sql  # Mount init script here
+  
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin
@@ -33,6 +24,15 @@ services:
     depends_on:
       - postgres
 
+  python-script:
+    build: .
+    container_name: python-script
+    depends_on:
+      - postgres
+    volumes:
+      - ./script.py:/app/script.py
+    entrypoint: ["python", "/app/script.py"]  # This ensures the script runs on container startup
+
 volumes:
   postgres_data:
-
+    driver: local
