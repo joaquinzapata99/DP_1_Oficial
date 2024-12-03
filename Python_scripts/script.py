@@ -17,35 +17,75 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
     conn = None
     cursor = None
     try:
+      
         # Conectar a PostgreSQL
-        conn = pg8000.connect(**db_config)
+        conn = pg8000.connect(**db_config) 
+
         cursor = conn.cursor()
 
-        # Cargar CSV en DataFrame
-        data = pd.read_csv(StringIO(csv_data), delimiter=delimiter)
+        # Ensure PostGIS extension is enabled
+        cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
 
-        # Log para verificar columnas y tipos de datos
+        # Load CSV into DataFrame
+        data = pd.read_csv(StringIO(csv_data), delimiter=delimiter)
+        
+        # Print column info for debugging
         print(f"Columnas y tipos de datos: {data.dtypes}")
 
-        # Crear tabla con tipos de datos más específicos
-        columns = ", ".join([f"{col} TEXT" for col in data.columns])  # Ajustar tipos de datos si es necesario
-        cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns});")
+        # Prepare table creation with explicit geometry column
+        data_columns = [col for col in data.columns if col != 'geo_point_2d']
+        
+        # Drop table if exists to recreate with correct schema
+        cursor.execute(f"DROP TABLE IF EXISTS {table_name};")
+        
+        # Create table with geometry column
+        create_table_query = f"""
+        CREATE TABLE {table_name} (
+            {', '.join([f'{col} TEXT' for col in data_columns])},
+            geo_point_2d geometry(Point, 4326)
+        );
+        """
+        cursor.execute(create_table_query)
 
-        # Insertar datos en la tabla utilizando parámetros para evitar problemas con comillas y caracteres especiales
+        # Prepare and insert data
         for _, row in data.iterrows():
-            # Convertir fila a una lista de valores
-            values = tuple(row)
-            placeholders = ", ".join(["%s"] * len(values))  # Crear placeholders (%s) para cada valor
+            # Handle geo_point_2d conversion
+            geo_point_query = 'NULL'
+            if 'geo_point_2d' in row and pd.notna(row['geo_point_2d']):
+                try:
+                    # Split coordinates and convert
+                    latitude, longitude = map(float, row['geo_point_2d'].split(','))
+                    geo_point_query = f"ST_SetSRID(ST_MakePoint({longitude}, {latitude}), 4326)"
+                except (ValueError, TypeError) as e:
+                    print(f"Error processing geo point {row['geo_point_2d']}: {e}")
+                    continue
 
-            # Ejecutar la inserción de forma segura utilizando parámetros
-            cursor.execute(f"INSERT INTO {table_name} VALUES ({placeholders});", values)
+            # Prepare values for insertion
+            values = [row[col] if col in data_columns else None for col in data_columns]
+            
+            # Create insert query with geometry
+            placeholders = ', '.join(['%s'] * len(values))
+            insert_query = f"""
+            INSERT INTO {table_name} ({', '.join(data_columns)}, geo_point_2d)
+            VALUES ({placeholders}, {geo_point_query});
+            """
+            
+            try:
+                cursor.execute(insert_query, values)
+            except Exception as insert_error:
+                print(f"Error inserting row: {insert_error}")
 
+        # Commit transactions
         conn.commit()
         print(f"Datos cargados en la tabla '{table_name}' correctamente.")
+
     except Exception as e:
         print(f"Error al cargar los datos en PostgreSQL: {e}")
+        if conn:
+            conn.rollback()
+
     finally:
-        # Close cursor and connection safely
+        # Safely close the cursor and connection
         if cursor:
             cursor.close()
         if conn:
