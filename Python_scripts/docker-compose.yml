@@ -42,6 +42,21 @@ services:
     networks:
       - app_network
 
+  streamlit-app:
+    build: .
+    container_name: streamlit-app
+    # Create a new entrypoint script for Streamlit
+    volumes:
+      - ./streamlit.py:/app/streamlit.py
+      - ./streamlit_entrypoint.sh:/app/streamlit_entrypoint.sh
+    entrypoint: ["/bin/sh", "/app/streamlit_entrypoint.sh"]
+    depends_on:
+      - postgres
+      - python-script  # Ensure python-script runs first
+    ports:
+      - "8501:8501"
+    networks:
+      - app_network
 volumes:
   postgres_data:
     driver: local
