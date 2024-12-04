@@ -12,7 +12,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init_postgis.sql:/docker-entrypoint-initdb.d/init_postgis.sql  # Mount init script here
-  
+    networks:
+      - app_network
+
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin
@@ -23,6 +25,8 @@ services:
       - "5050:80"
     depends_on:
       - postgres
+    networks:
+      - app_network
 
   python-script:
     build: .
@@ -31,8 +35,16 @@ services:
       - postgres
     volumes:
       - ./script.py:/app/script.py
-    entrypoint: ["python", "/app/script.py"]  # This ensures the script runs on container startup
+      - ./scriptbarrios.py:/app/scriptbarrios.py
+      - ./entrypoint.sh:/app/entrypoint.sh  # Script de entrada
+    entrypoint: ["/bin/sh", "/app/entrypoint.sh"]  # Ejecutar el script de shell en el inicio
+    networks:
+      - app_network
 
 volumes:
   postgres_data:
     driver: local
+
+networks:
+  app_network:
+    driver: bridge
