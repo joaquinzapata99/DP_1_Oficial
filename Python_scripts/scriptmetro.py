@@ -3,7 +3,6 @@ import pandas as pd
 import pg8000
 from io import StringIO
 from time import sleep
-import random  # Para generar valores aleatorios
 
 def descargar_csv(url):
     try:
@@ -29,47 +28,38 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         data = pd.read_csv(StringIO(csv_data), delimiter=delimiter)
 
         # Filtrar columnas necesarias
-        filtered_data = data[['Nombre', 'geo_shape']]
-
-        # Generar la columna 'Criminalidad' basada en el índice del barrio
-        filtered_data['Criminalidad'] = [
-            list(range(random.randint(0, 3) + 1)) for _ in range(len(filtered_data))
-        ]
-
-        # Convertir la lista a un string para almacenamiento
-        filtered_data['Criminalidad'] = filtered_data['Criminalidad'].apply(lambda x: ",".join(map(str, x)))
-
+        filtered_data = data[['Denominació / Denominación', 'geo_point_2d']]
 
         # Imprimir datos filtrados para depuración
-        print(f"Datos filtrados con criminalidad:\n{filtered_data.head()}")
+        print(f"Datos filtrados:\n{filtered_data.head()}")
 
         # Crear tabla en PostgreSQL
         cursor.execute(f"DROP TABLE IF EXISTS {table_name};")
         create_table_query = f"""
         CREATE TABLE {table_name} (
-            Nombre TEXT,
-            geo_shape geometry(Polygon, 4326),
-            Criminalidad TEXT
+            denominacion TEXT,
+            geo_point_2d geometry(Point, 4326)
         );
         """
         cursor.execute(create_table_query)
 
         # Insertar datos en la tabla
         for _, row in filtered_data.iterrows():
-            geo_shape_query = 'NULL'
-            if pd.notna(row['geo_shape']):
+            geo_point_query = 'NULL'
+            if pd.notna(row['geo_point_2d']):
                 try:
-                    geo_shape_query = f"ST_GeomFromGeoJSON('{row['geo_shape']}')"
-                except Exception as e:
-                    print(f"Error procesando geo_shape: {e}")
+                    latitude, longitude = map(float, row['geo_point_2d'].split(','))
+                    geo_point_query = f"ST_SetSRID(ST_MakePoint({longitude}, {latitude}), 4326)"
+                except (ValueError, TypeError) as e:
+                    print(f"Error procesando geo_point_2d {row['geo_point_2d']}: {e}")
                     continue
 
             insert_query = f"""
-            INSERT INTO {table_name} (nombre, geo_shape, criminalidad)
-            VALUES (%s, {geo_shape_query}, %s);
+            INSERT INTO {table_name} (denominacion, geo_point_2d)
+            VALUES (%s, {geo_point_query});
             """
             try:
-                cursor.execute(insert_query, (row['Nombre'], row['Criminalidad']))
+                cursor.execute(insert_query, (row['Denominació / Denominación'],))
             except Exception as insert_error:
                 print(f"Error al insertar fila: {insert_error}")
 
@@ -91,8 +81,8 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
 sleep(5)
 
 # Configuración
-URL_CSV = "https://valencia.opendatasoft.com/api/explore/v2.1/catalog/datasets/barris-barrios/exports/csv?lang=es&timezone=Europe%2FBerlin&use_labels=true&delimiter=%3B"
-NOMBRE_TABLA = "barrios_valencia"
+URL_CSV = "https://valencia.opendatasoft.com/api/explore/v2.1/catalog/datasets/fgv-bocas/exports/csv?lang=es&timezone=Europe%2FBerlin&use_labels=true&delimiter=%3B"  # Reemplaza con la URL de tu API
+NOMBRE_TABLA = "paradas_metro"
 CONFIG_DB = {
     "host": "postgres",  # Nombre del servicio definido en docker-compose
     "port": 5432,

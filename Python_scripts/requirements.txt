@@ -1,3 +1,8 @@
 requests
 pandas
 pg8000
+streamlit
+geopandas
+folium
+sqlalchemy
+streamlit-folium
