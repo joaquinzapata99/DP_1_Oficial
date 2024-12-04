@@ -79,7 +79,7 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         if conn:
             conn.close()
 
-sleep(45)
+sleep(25)
 
 # Configuración
 URL_CSV = "https://valencia.opendatasoft.com/api/explore/v2.1/catalog/datasets/valenbisi-disponibilitat-valenbisi-dsiponibilidad/exports/csv?lang=en&timezone=Europe%2FBerlin&use_labels=true&delimiter=%3B"

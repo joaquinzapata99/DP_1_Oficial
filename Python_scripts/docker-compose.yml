@@ -36,6 +36,7 @@ services:
     volumes:
       - ./script.py:/app/script.py
       - ./scriptbarrios.py:/app/scriptbarrios.py
+      - ./scriptmetro.py:/app/scriptmetro.py
       - ./entrypoint.sh:/app/entrypoint.sh  # Script de entrada
     entrypoint: ["/bin/sh", "/app/entrypoint.sh"]  # Ejecutar el script de shell en el inicio
     networks:
