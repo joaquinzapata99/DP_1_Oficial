@@ -27,19 +27,18 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         # Cargar datos en un DataFrame
         data = pd.read_csv(StringIO(csv_data), delimiter=delimiter)
 
-        # Filtrar columnas necesarias y concatenar Dirección y Número
-        data['direccion_numero'] = data['Direccion'] + ', ' + data['Numero'].astype(str)
-        filtered_data = data[['direccion_numero', 'geo_point_2d']]
+        # Filtrar columnas necesarias
+        filtered_data = data[['Geo Point', 'regimen']]
 
-        # Imprimir datos filtrados para depuracióna
+        # Imprimir datos filtrados para depuración
         print(f"Datos filtrados:\n{filtered_data.head()}")
 
         # Crear tabla en PostgreSQL
         cursor.execute(f"DROP TABLE IF EXISTS {table_name};")
         create_table_query = f"""
         CREATE TABLE {table_name} (
-            direccion_numero TEXT,
-            geo_point_2d geometry(Point, 4326)
+            geo_point geometry(Point, 4326),
+            regimen TEXT
         );
         """
         cursor.execute(create_table_query)
@@ -47,20 +46,20 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         # Insertar datos en la tabla
         for _, row in filtered_data.iterrows():
             geo_point_query = 'NULL'
-            if pd.notna(row['geo_point_2d']):
+            if pd.notna(row['Geo Point']):
                 try:
-                    latitude, longitude = map(float, row['geo_point_2d'].split(','))
+                    latitude, longitude = map(float, row['Geo Point'].split(','))
                     geo_point_query = f"ST_SetSRID(ST_MakePoint({longitude}, {latitude}), 4326)"
                 except (ValueError, TypeError) as e:
-                    print(f"Error procesando geo_point_2d {row['geo_point_2d']}: {e}")
+                    print(f"Error procesando Geo Point {row['Geo Point']}: {e}")
                     continue
 
             insert_query = f"""
-            INSERT INTO {table_name} (direccion_numero, geo_point_2d)
-            VALUES (%s, {geo_point_query});
+            INSERT INTO {table_name} (geo_point, regimen)
+            VALUES ({geo_point_query}, %s);
             """
             try:
-                cursor.execute(insert_query, (row['direccion_numero'],))
+                cursor.execute(insert_query, (row['regimen'],))
             except Exception as insert_error:
                 print(f"Error al insertar fila: {insert_error}")
 
@@ -79,11 +78,11 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         if conn:
             conn.close()
 
-sleep(25)
+sleep(30)
 
 # Configuración
-URL_CSV = "https://valencia.opendatasoft.com/api/explore/v2.1/catalog/datasets/valenbisi-disponibilitat-valenbisi-dsiponibilidad/exports/csv?lang=en&timezone=Europe%2FBerlin&use_labels=true&delimiter=%3B"
-NOMBRE_TABLA = "valenbisi_disponibilidad"
+URL_CSV = "https://valencia.opendatasoft.com/api/explore/v2.1/catalog/datasets/centros-educativos-en-valencia/exports/csv?lang=en&timezone=Europe%2FBerlin&use_labels=true&delimiter=%3B"
+NOMBRE_TABLA = "centros_educativos"
 CONFIG_DB = {
     "host": "postgres",  # Nombre del servicio definido en docker-compose
     "port": 5432,
