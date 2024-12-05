@@ -148,21 +148,22 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
                 fillColor=metro_color
             ).add_to(m)
 
-    # Plot educational centers
-    centros_data = centros_data[centros_data.geometry.notnull()]
-    for _, row in centros_data.iterrows():
-        if row['regimen_normalized'] in normalized_selected_types:
-            point = row.geometry
-            if point.is_empty:
-                continue
-            folium.CircleMarker(
-                location=[point.y, point.x],
-                radius=5,
-                popup=f"{row.get('nombre', 'Centro Educativo')} ({row['regimen']})",
-                color=school_colors.get(row['regimen_normalized'], 'gray'),
-                fill=True,
-                fillColor=school_colors.get(row['regimen_normalized'], 'gray')
-            ).add_to(m)
+    # Plot educational centers (only if we have a filtered dataset and user wanted them)
+    if len(centros_data) > 0:
+        centros_data = centros_data[centros_data.geometry.notnull()]
+        for _, row in centros_data.iterrows():
+            if row['regimen_normalized'] in normalized_selected_types:
+                point = row.geometry
+                if point.is_empty:
+                    continue
+                folium.CircleMarker(
+                    location=[point.y, point.x],
+                    radius=5,
+                    popup=f"{row.get('nombre', 'Centro Educativo')} ({row['regimen']})",
+                    color=school_colors.get(row['regimen_normalized'], 'gray'),
+                    fill=True,
+                    fillColor=school_colors.get(row['regimen_normalized'], 'gray')
+                ).add_to(m)
 
     # Plot filtered barrios
     filtered_barrios_data = filtered_barrios_data[filtered_barrios_data.geometry.notnull()]
@@ -205,44 +206,55 @@ def main():
     if metro_data is not None and barrios_data is not None and centros_data is not None:
         # Sidebar options
         st.sidebar.subheader("Personaliza tu mapa:")
-        
-        # Checkbox for showing/hiding metro stations
-        show_metro_stations = st.sidebar.checkbox("Mostrar paradas de metro", value=True)
-        
         st.sidebar.markdown("### ¿Usas el metro frecuentemente 🚇?")
         response = st.sidebar.radio("¿Necesitas acceso al metro?", ("Sí", "No"))
         filter_metro_stations_only = response == "Sí"
+        
+        # Si el usuario necesita acceso al metro, forzamos a mostrar las paradas de metro.
+        if filter_metro_stations_only:
+            show_metro_stations = True
 
         st.sidebar.markdown("### ¿Cuánto valoras la seguridad de tu barrio? 🚔")
         security_value = st.sidebar.slider("Selecciona el nivel mínimo de seguridad:", 0, 3, 0)
         
-        # School type selection
-        st.sidebar.markdown("### Tipos de Centros Educativos 🏫")
-        selected_school_types = st.sidebar.multiselect(
-            "Selecciona los tipos de centros:",
-            ['publico', 'concertado', 'privado'],
-            default=['publico', 'concertado', 'privado']
-        )
+        # Preguntar si se desean centros educativos
+        st.sidebar.markdown("### ¿Necesitas centros educativos cerca? 🏫")
+        need_educational_centers = st.sidebar.radio("¿Quieres filtrar por centros educativos?", ("No", "Sí"))
 
-        # Apply filters to barrios based on security level
+        selected_school_types = []
+        # Si el usuario quiere centros educativos, mostrar el filtro por tipo
+        if need_educational_centers == "Sí":
+            selected_school_types = st.sidebar.multiselect(
+                "Selecciona los tipos de centros:",
+                ['publico', 'concertado', 'privado'],
+                default=['publico', 'concertado', 'privado']
+            )
+
+        # Aplicar filtros de barrios según el nivel de seguridad
         filtered_barrios_data = barrios_data[barrios_data['criminalidad'] >= security_value]
 
-        # Filter metro stations that are within the selected barrios
+        # Filtrar paradas de metro en función de los barrios seleccionados
         metro_data_filtered = filter_metro_within_barrios(metro_data, filtered_barrios_data)
 
-        # Further filter barrios to only those with metro stations if required
+        # Si se requieren barrios con metro
         if filter_metro_stations_only and show_metro_stations:
             filtered_barrios_data = filtered_barrios_data[
                 filtered_barrios_data.geometry.intersects(metro_data_filtered.geometry.unary_union)
             ]
 
-        # Filter educational centers based on the updated barrios and school types
-        centros_data_filtered = filter_centers_within_barrios(
-            centros_data, 
-            filtered_barrios_data, 
-            metro_data, 
-            filter_metro_stations_only
-        )
+        # Filtrar centros educativos solo si el usuario quiere centros educativos cerca
+        if need_educational_centers == "Sí":
+            centros_data_filtered = filter_centers_within_barrios(
+                centros_data, 
+                filtered_barrios_data, 
+                metro_data, 
+                filter_metro_stations_only
+            )
+            # Filtrar por tipos seleccionados
+            centros_data_filtered = centros_data_filtered[centros_data_filtered['regimen_normalized'].isin([normalize_text(t) for t in selected_school_types])]
+        else:
+            # El usuario no quiere filtrar centros, por lo que no se mostrarán
+            centros_data_filtered = pd.DataFrame(columns=centros_data.columns)
 
         # Debug: Display the count of filtered results
         print(f"Filtered Barrios: {len(filtered_barrios_data)}")
@@ -276,8 +288,11 @@ def main():
 
         with tab4:
             st.subheader("Detalles de los Centros Educativos")
-            filtered_centros_display = centros_data_filtered.drop(columns=['geometry', 'geo_point'], errors='ignore')
-            st.dataframe(filtered_centros_display)
+            if need_educational_centers == "Sí":
+                filtered_centros_display = centros_data_filtered.drop(columns=['geometry', 'geo_point'], errors='ignore')
+                st.dataframe(filtered_centros_display)
+            else:
+                st.write("No se han filtrado centros educativos.")
 
     else:
         st.error("No se pudieron obtener los datos geográficos. Verifica la conexión con la base de datos.")
