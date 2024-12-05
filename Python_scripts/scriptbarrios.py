@@ -31,14 +31,8 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         # Filtrar columnas necesarias
         filtered_data = data[['Nombre', 'geo_shape']]
 
-        # Generar la columna 'Criminalidad' basada en el índice del barrio
-        filtered_data['Criminalidad'] = [
-            list(range(random.randint(0, 3) + 1)) for _ in range(len(filtered_data))
-        ]
-
-        # Convertir la lista a un string para almacenamiento
-        filtered_data['Criminalidad'] = filtered_data['Criminalidad'].apply(lambda x: ",".join(map(str, x)))
-
+        # Generar la columna 'Criminalidad' con un número aleatorio entre 0 y 3
+        filtered_data['Criminalidad'] = [random.randint(0, 3) for _ in range(len(filtered_data))]
 
         # Imprimir datos filtrados para depuración
         print(f"Datos filtrados con criminalidad:\n{filtered_data.head()}")
@@ -49,7 +43,7 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         CREATE TABLE {table_name} (
             Nombre TEXT,
             geo_shape geometry(Polygon, 4326),
-            Criminalidad TEXT
+            Criminalidad INTEGER
         );
         """
         cursor.execute(create_table_query)
