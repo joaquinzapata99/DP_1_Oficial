@@ -148,7 +148,7 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
                 fillColor=metro_color
             ).add_to(m)
 
-    # Plot educational centers (only if we have a filtered dataset and user wanted them)
+    # Plot educational centers
     if len(centros_data) > 0:
         centros_data = centros_data[centros_data.geometry.notnull()]
         for _, row in centros_data.iterrows():
@@ -206,9 +206,14 @@ def main():
     if metro_data is not None and barrios_data is not None and centros_data is not None:
         # Sidebar options
         st.sidebar.subheader("Personaliza tu mapa:")
+        
+        #filtro de metro
         st.sidebar.markdown("### ¿Usas el metro frecuentemente 🚇?")
         response = st.sidebar.radio("¿Necesitas acceso al metro?", ("Sí", "No"))
         filter_metro_stations_only = response == "Sí"
+
+        # Checkbox para mostrar paradas de metro (por defecto True)
+        show_metro_stations = st.sidebar.checkbox("Mostrar paradas de metro", value=True)
         
         # Si el usuario necesita acceso al metro, forzamos a mostrar las paradas de metro.
         if filter_metro_stations_only:
@@ -266,9 +271,10 @@ def main():
 
         with tab1:
             st.subheader("Mapa Interactivo")
+            # Aquí pasamos barrios_data original como segundo parámetro, y filtered_barrios_data en el quinto.
             m = create_map(
                 metro_data_filtered, 
-                filtered_barrios_data, 
+                barrios_data, 
                 centros_data_filtered, 
                 filter_metro_stations_only, 
                 filtered_barrios_data, 
