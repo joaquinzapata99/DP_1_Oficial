@@ -3,7 +3,7 @@ import pandas as pd
 import pg8000
 from io import StringIO
 from time import sleep
-import random  # Para generar valores aleatorios
+import random  # Para generar valores aleatorios con probabilidades
 
 def descargar_csv(url):
     try:
@@ -31,8 +31,14 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         # Filtrar columnas necesarias
         filtered_data = data[['Nombre', 'geo_shape']]
 
-        # Generar la columna 'Criminalidad' con un número aleatorio entre 0 y 3
-        filtered_data['Criminalidad'] = [random.randint(0, 3) for _ in range(len(filtered_data))]
+        # Generar la columna 'Criminalidad' con la distribución deseada
+        num_rows = len(filtered_data)
+        criminalidad_values = random.choices(
+            population=[3, 2, 1, 0],  # Valores posibles
+            weights=[0.4, 0.3, 0.2, 0.1],  # Probabilidades asociadas
+            k=num_rows  # Número de valores a generar
+        )
+        filtered_data['Criminalidad'] = criminalidad_values
 
         # Imprimir datos filtrados para depuración
         print(f"Datos filtrados con criminalidad:\n{filtered_data.head()}")
