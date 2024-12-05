@@ -48,23 +48,25 @@ def fetch_data(table_name):
 
         # Detect geometry columns
         geo_columns = [col[0] for col in columns if 'geo' in col[0].lower() or 'shape' in col[0].lower() or 'point' in col[0].lower()]
-
         if not geo_columns:
             st.error(f"No geometry column found in table {table_name}")
             return None
 
-        # Read data with the detected geometry column
         geo_col = geo_columns[0]  # Use the first valid geometry column
-        query = text(f"SELECT * FROM {table_name} LIMIT 500;")
+        query = text(f"SELECT *, {geo_col} AS geometry FROM {table_name} LIMIT 500;")
 
         # Read data using GeoPandas
         with engine.connect() as conn:
-            data = gpd.read_postgis(query, conn, geom_col=geo_col)
-        
-        # Normalize some columns for consistent filtering
+            data = gpd.read_postgis(query, conn, geom_col='geometry')
+
+        # Normalize columns for consistent filtering
         if 'regimen' in data.columns:
             data['regimen_normalized'] = data['regimen'].apply(normalize_text)
-        
+
+        # Check for valid geometries and drop invalid ones
+        data = data[data.geometry.notnull()]
+        data = data[data.geometry.is_valid]
+
         st.success(f"Successfully read data using geometry column: {geo_col}")
         return data
 
@@ -77,6 +79,10 @@ def filter_metro_within_barrios(metro_data, barrios_data):
     try:
         # Combine all polygons of selected districts
         combined_barrios_geometry = barrios_data.unary_union
+
+        # Ensure geometries are valid before filtering
+        metro_data = metro_data[metro_data.geometry.notnull()]
+        metro_data = metro_data[metro_data.geometry.is_valid]
 
         # Filter metro stations within the selected districts
         metro_data_filtered = metro_data[metro_data.geometry.within(combined_barrios_geometry)]
@@ -93,20 +99,21 @@ def filter_centers_within_barrios(centers_data, barrios_data, metro_data=None, f
         # Combine all polygons of selected districts
         combined_barrios_geometry = barrios_data.unary_union
 
+        # Ensure geometries are valid before filtering
+        centers_data = centers_data[centers_data.geometry.notnull()]
+        centers_data = centers_data[centers_data.geometry.is_valid]
+
         # Filter centers within the selected districts
         centers_in_barrios = centers_data[centers_data.geometry.within(combined_barrios_geometry)]
 
         # If metro station filtering is enabled
         if filter_metro_stations_only and metro_data is not None:
-            # Filter districts that have metro stations
             barrios_with_metro = barrios_data[barrios_data.geometry.intersects(metro_data.geometry.unary_union)]
-            
-            # Further filter centers to only those in districts with metro stations
             centers_filtered = centers_in_barrios[
                 centers_in_barrios.geometry.within(barrios_with_metro.unary_union)
             ]
             return centers_filtered
-        
+
         return centers_in_barrios
 
     except Exception as e:
@@ -114,85 +121,66 @@ def filter_centers_within_barrios(centers_data, barrios_data, metro_data=None, f
         return centers_data
 
 def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_only, filtered_barrios_data, show_metro_stations, selected_school_types):
-    """Create an interactive Folium map"""
+    """Create an interactive Folium map with only the filtered barrios"""
     m = folium.Map(location=[39.4699, -0.3763], zoom_start=12)  
 
     # Color schemes
     metro_color = 'red'
-    barrios_color = 'blue'
     selected_color = 'green'
-    
-    # School type colors
-    school_colors = {
-        'publico': 'purple',
-        'concertado': 'orange',
-        'privado': 'blue'
-    }
+    school_colors = {'publico': 'purple', 'concertado': 'orange', 'privado': 'blue'}
 
     # Normalize selected school types
     normalized_selected_types = [normalize_text(st) for st in selected_school_types]
 
-    # Plot metro stations (only if the option is enabled)
+    # Plot metro stations
     if show_metro_stations:
+        metro_data = metro_data[metro_data.geometry.notnull()]
         for _, row in metro_data.iterrows():
-            try:
-                geo_col = [col for col in row.index if 'geo' in col.lower() or 'point' in col.lower()][0]
-                point = row[geo_col]
-                
-                if not point.is_empty:
-                    folium.CircleMarker(
-                        location=[point.y, point.x],
-                        radius=5,
-                        popup=row.get("name", "Metro Station"),
-                        color=metro_color,
-                        fill=True,
-                        fillColor=metro_color
-                    ).add_to(m)
-            except Exception as e:
-                st.warning(f"Error plotting metro station: {e}")
+            point = row.geometry
+            if point.is_empty:
+                continue
+            folium.CircleMarker(
+                location=[point.y, point.x],
+                radius=5,
+                popup=row.get("name", "Parada de Metro"),
+                color=metro_color,
+                fill=True,
+                fillColor=metro_color
+            ).add_to(m)
 
     # Plot educational centers
+    centros_data = centros_data[centros_data.geometry.notnull()]
     for _, row in centros_data.iterrows():
-        try:
-            # Use normalized comparison for school types
-            if row['regimen_normalized'] in normalized_selected_types:
-                point = row['geo_point']
-                
-                if not point.is_empty:
-                    folium.CircleMarker(
-                        location=[point.y, point.x],
-                        radius=5,
-                        popup=f"{row.get('nombre', 'Centro Educativo')} ({row['regimen']})",
-                        color=school_colors.get(normalize_text(row['regimen']), 'gray'),
-                        fill=True,
-                        fillColor=school_colors.get(normalize_text(row['regimen']), 'gray')
-                    ).add_to(m)
-        except Exception as e:
-            st.warning(f"Error plotting educational center: {e}")
+        if row['regimen_normalized'] in normalized_selected_types:
+            point = row.geometry
+            if point.is_empty:
+                continue
+            folium.CircleMarker(
+                location=[point.y, point.x],
+                radius=5,
+                popup=f"{row.get('nombre', 'Centro Educativo')} ({row['regimen']})",
+                color=school_colors.get(row['regimen_normalized'], 'gray'),
+                fill=True,
+                fillColor=school_colors.get(row['regimen_normalized'], 'gray')
+            ).add_to(m)
 
-    # Plot barrios (districts) from filtered data
+    # Plot filtered barrios
+    filtered_barrios_data = filtered_barrios_data[filtered_barrios_data.geometry.notnull()]
     for _, row in filtered_barrios_data.iterrows():
-        try:
-            geo_col = [col for col in row.index if 'geo' in col.lower() or 'shape' in col.lower()][0]
-            geometry = row[geo_col]
-            
-            # Get the neighborhood name using 'nombre' column
-            neighborhood_name = row.get("nombre", "Barrio sin nombre")
-            
-            if geometry.geom_type in ['Polygon', 'MultiPolygon']:
-                folium.GeoJson(
-                    geometry.__geo_interface__,
-                    popup=row.get("nombre", "Barrio"),
-                    tooltip=neighborhood_name,
-                    style_function=lambda feature: {
-                        'fillColor': selected_color,
-                        'fillOpacity': 0.5,
-                        'weight': 1,
-                        'color': selected_color
-                    }
-                ).add_to(m)
-        except Exception as e:
-            st.warning(f"Error plotting barrio: {e}")
+        geometry = row.geometry
+        if geometry.is_empty:
+            continue
+        folium.GeoJson(
+            geometry.__geo_interface__,
+            popup=row.get("nombre", "Barrio sin nombre"),
+            tooltip=row.get("nombre", "Barrio sin nombre"),
+            style_function=lambda _: {
+                'fillColor': selected_color,
+                'fillOpacity': 0.5,
+                'weight': 1,
+                'color': selected_color
+            }
+        ).add_to(m)
 
     return m
 
@@ -206,7 +194,7 @@ def main():
     st.title("Haz match con tu nuevo hogar 🌇")
     st.markdown("""
     ### Mapa interactivo parguela
-    Mira a ver cual es tu sitio, que te veo desubicado **pinpin**
+    Mira a ver cuál es tu sitio, que te veo desubicado **pinpin**
     """)
 
     with st.spinner('Fetching geographic data...'):
@@ -215,23 +203,20 @@ def main():
         centros_data = fetch_data("centros_educativos")
 
     if metro_data is not None and barrios_data is not None and centros_data is not None:
-        # Debug: Print unique school types before filtering
-        print("Unique school types (normalized):")
-        print(centros_data['regimen_normalized'].unique())
-
-        st.sidebar.subheader("Personalize your map:")
+        # Sidebar options
+        st.sidebar.subheader("Personaliza tu mapa:")
         
         # Checkbox for showing/hiding metro stations
-        show_metro_stations = st.sidebar.checkbox("Show Metro Stations", value=True)
+        show_metro_stations = st.sidebar.checkbox("Mostrar paradas de metro", value=True)
         
         st.sidebar.markdown("### ¿Usas el metro frecuentemente 🚇?")
-        response = st.sidebar.radio("Choose an option:", ("Yes", "No"))
-        filter_metro_stations_only = response == "Yes"
+        response = st.sidebar.radio("¿Necesitas acceso al metro?", ("Sí", "No"))
+        filter_metro_stations_only = response == "Sí"
 
         st.sidebar.markdown("### ¿Cuánto valoras la seguridad de tu barrio? 🚔")
-        security_value = st.sidebar.slider("Select security value:", 0, 3, 0)
+        security_value = st.sidebar.slider("Selecciona el nivel mínimo de seguridad:", 0, 3, 0)
         
-        # School type selection with normalization
+        # School type selection
         st.sidebar.markdown("### Tipos de Centros Educativos 🏫")
         selected_school_types = st.sidebar.multiselect(
             "Selecciona los tipos de centros:",
@@ -239,13 +224,19 @@ def main():
             default=['publico', 'concertado', 'privado']
         )
 
-        # Filtrar barrios por nivel de seguridad
+        # Apply filters to barrios based on security level
         filtered_barrios_data = barrios_data[barrios_data['criminalidad'] >= security_value]
 
-        # Filtrar paradas de metro que están dentro de los barrios seleccionados
+        # Filter metro stations that are within the selected barrios
         metro_data_filtered = filter_metro_within_barrios(metro_data, filtered_barrios_data)
 
-        # Filtrar centros educativos 
+        # Further filter barrios to only those with metro stations if required
+        if filter_metro_stations_only and show_metro_stations:
+            filtered_barrios_data = filtered_barrios_data[
+                filtered_barrios_data.geometry.intersects(metro_data_filtered.geometry.unary_union)
+            ]
+
+        # Filter educational centers based on the updated barrios and school types
         centros_data_filtered = filter_centers_within_barrios(
             centros_data, 
             filtered_barrios_data, 
@@ -253,30 +244,43 @@ def main():
             filter_metro_stations_only
         )
 
-        tab1, tab2, tab3, tab4 = st.tabs(["Map", "Metro Stations", "Barrios", "Educational Centers"])
+        # Debug: Display the count of filtered results
+        print(f"Filtered Barrios: {len(filtered_barrios_data)}")
+        print(f"Filtered Metro Stations: {len(metro_data_filtered)}")
+        print(f"Filtered Educational Centers: {len(centros_data_filtered)}")
+
+        # Tabs for displaying data
+        tab1, tab2, tab3, tab4 = st.tabs(["Mapa", "Paradas de Metro", "Barrios", "Centros Educativos"])
 
         with tab1:
-            st.subheader("Interactive Map")
-            m = create_map(metro_data_filtered, barrios_data, centros_data_filtered, 
-                           filter_metro_stations_only, filtered_barrios_data, 
-                           show_metro_stations, selected_school_types)
+            st.subheader("Mapa Interactivo")
+            m = create_map(
+                metro_data_filtered, 
+                filtered_barrios_data, 
+                centros_data_filtered, 
+                filter_metro_stations_only, 
+                filtered_barrios_data, 
+                show_metro_stations, 
+                selected_school_types
+            )
             st_folium(m, width=900, height=600)
 
         with tab2:
-            st.subheader("Metro Stations Details")
+            st.subheader("Detalles de las Paradas de Metro")
             st.dataframe(metro_data_filtered)
 
         with tab3:
-            st.subheader("Barrios Details")
+            st.subheader("Detalles de los Barrios")
             filtered_barrios_display = filtered_barrios_data.drop(columns=['geometry'], errors='ignore')
             st.dataframe(filtered_barrios_display)
 
         with tab4:
-            st.subheader("Educational Centers Details")
+            st.subheader("Detalles de los Centros Educativos")
             filtered_centros_display = centros_data_filtered.drop(columns=['geometry', 'geo_point'], errors='ignore')
             st.dataframe(filtered_centros_display)
+
     else:
-        st.error("Failed to retrieve geographic data. Please check your database connection.")
+        st.error("No se pudieron obtener los datos geográficos. Verifica la conexión con la base de datos.")
 
 if __name__ == "__main__":
     main()
