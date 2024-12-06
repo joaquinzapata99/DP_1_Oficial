@@ -1,19 +1,23 @@
 FROM python:3.9-slim
 
-# Establecer el directorio de trabajo
 WORKDIR /app
 
-# Copiar los archivos necesarios
+# Copy necessary files
 COPY requirements.txt requirements.txt
 COPY script.py script.py
 COPY scriptbarrios.py scriptbarrios.py
+COPY scriptmetro.py scriptmetro.py
+COPY scriptcompras.py scriptcompras.py
 COPY entrypoint.sh entrypoint.sh
 
-# Instalar las dependencias
+# Create IdeaDatos directory and copy files
+COPY IdeaDatos /app/IdeaDatos
+
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Hacer que el script de entrada sea ejecutable
+# Make entrypoint script executable
 RUN chmod +x entrypoint.sh
 
-# Configurar el comando predeterminado para ejecutar el entrypoint
+# Set default command
 CMD ["/bin/sh", "/app/entrypoint.sh"]
