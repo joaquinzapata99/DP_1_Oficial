@@ -47,7 +47,8 @@ services:
     container_name: streamlit-app
     # Create a new entrypoint script for Streamlit
     volumes:
-      - ./streamlit.py:/app/streamlit.py
+      - ./menu.py:/app/menu.py
+      - ./pages:/app/pages
       - ./streamlit_entrypoint.sh:/app/streamlit_entrypoint.sh
     entrypoint: ["/bin/sh", "/app/streamlit_entrypoint.sh"]
     depends_on:

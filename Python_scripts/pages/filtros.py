@@ -188,7 +188,7 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
 def main():
     st.set_page_config(
         page_title="Tindralencia 🔥", 
-        page_icon=":metro:", 
+        page_icon=":house:", 
         layout="wide"
     )
 
@@ -257,6 +257,15 @@ def main():
             )
             # Filtrar por tipos seleccionados
             centros_data_filtered = centros_data_filtered[centros_data_filtered['regimen_normalized'].isin([normalize_text(t) for t in selected_school_types])]
+            
+            # Refiltrar barrios para que solo queden los que contengan centros educativos filtrados
+            if len(centros_data_filtered) > 0:
+                filtered_barrios_data = filtered_barrios_data[
+                    filtered_barrios_data.geometry.intersects(centros_data_filtered.unary_union)
+                ]
+            else:
+                # Si no hay centros educativos que cumplan las condiciones, no se muestran barrios
+                filtered_barrios_data = gpd.GeoDataFrame(columns=filtered_barrios_data.columns)
         else:
             # El usuario no quiere filtrar centros, por lo que no se mostrarán
             centros_data_filtered = pd.DataFrame(columns=centros_data.columns)
