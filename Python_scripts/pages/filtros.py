@@ -356,12 +356,25 @@ def main():
 
                 if need_educational_centers == "Sí":
                     st.subheader("Centros Educativos Filtrados")
+    
                     if not centros_data_filtered.empty:
-                        filtered_centros_display = centros_data_filtered.drop(columns=['geometry', 'geo_point'], errors='ignore')
-                        st.dataframe(filtered_centros_display)
+                        # Asegúrate de que las columnas que deseas mostrar están presentes
+                        columnas_a_mostrar = ['nombre', 'regimen', 'direccion', 'mail', 'telef', 'dgenerica_', 'despecific']
+        
+                        # Verifica qué columnas están disponibles en los datos
+                        columnas_presentes = [col for col in columnas_a_mostrar if col in centros_data_filtered.columns]
+        
+                        if columnas_presentes:
+                            # Simplemente muestra todas las columnas relevantes, sin aplicar filtros
+                            st.dataframe(centros_data_filtered[columnas_presentes])
+                        else:
+                            st.warning(f"No se encuentran todas las columnas requeridas: {columnas_a_mostrar}")
                     else:
-                        st.write("No hay centros educativos que cumplan las condiciones.")
+                        st.info("No hay centros educativos disponibles para mostrar.")
 
+
+
+                        
                 if price_category != "Todos":
                     st.subheader("Información de Precios")
                     if not filtered_barrios_data.empty:
