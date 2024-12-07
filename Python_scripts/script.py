@@ -78,7 +78,7 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         if conn:
             conn.close()
 
-sleep(30)
+sleep(20)
 
 # Configuración
 URL_CSV = "https://valencia.opendatasoft.com/api/explore/v2.1/catalog/datasets/centros-educativos-en-valencia/exports/csv?lang=en&timezone=Europe%2FBerlin&use_labels=true&delimiter=%3B"
