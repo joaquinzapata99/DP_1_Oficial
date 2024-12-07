@@ -13,6 +13,9 @@ python scriptmetro.py
 echo "Ejecutando compras..."
 python scriptcompras.py
 
+echo "Ejecutando precios..."
+python scriptprecios.py
+
 echo "Ejecutando alquileres..."
 python scriptalquileres.py
 
