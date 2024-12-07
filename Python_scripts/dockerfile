@@ -10,8 +10,8 @@ COPY scriptmetro.py scriptmetro.py
 COPY scriptcompras.py scriptcompras.py
 COPY scriptalquileres.py scriptalquileres.py
 COPY scriptprecios.py scriptprecios.py
+COPY scriptdemanda.py scriptdemanda.py
 
-# Copy the entrypoint script
 COPY entrypoint.sh entrypoint.sh
 
 # Create IdeaDatos directory and copy files
