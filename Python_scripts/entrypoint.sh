@@ -13,5 +13,8 @@ python scriptmetro.py
 echo "Ejecutando compras..."
 python scriptcompras.py
 
+echo "Ejecutando alquileres..."
+python scriptalquileres.py
+
 # Mantener el contenedor activo después de ejecutar los scripts
 tail -f /dev/null
