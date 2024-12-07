@@ -2,8 +2,10 @@
 set -e
 
 # Wait a bit to ensure previous scripts have completed
+
 echo "Waiting for database to be ready..."
 sleep 40
+
 
 # Run Streamlit
 echo "Starting Streamlit application..."
