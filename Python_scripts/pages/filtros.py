@@ -5,6 +5,7 @@ from streamlit_folium import st_folium
 import folium
 from sqlalchemy import create_engine, text
 import unicodedata
+import numpy as np
 
 # Enhanced Database Configuration
 DB_CONFIG = {
@@ -38,6 +39,14 @@ def fetch_data(table_name):
             result = conn.execute(columns_query)
             columns = result.fetchall()
 
+        # Price data handling
+        if table_name == 'precios_barrios':
+            query = text(f"SELECT * FROM {table_name};")
+            with engine.connect() as conn:
+                price_data = pd.read_sql(query, conn)
+            return price_data
+
+        # Geometry columns handling
         geo_columns = [col[0] for col in columns if 'geo' in col[0].lower() or 'shape' in col[0].lower() or 'point' in col[0].lower()]
         if not geo_columns:
             st.error(f"No geometry column found in table {table_name}")
@@ -218,8 +227,9 @@ def main():
             metro_data = fetch_data("paradas_metro")
             barrios_data = fetch_data("barrios_valencia")
             centros_data = fetch_data("centros_educativos")
+            precios_data = fetch_data("precios_barrios")
 
-        if metro_data is None or barrios_data is None or centros_data is None:
+        if metro_data is None or barrios_data is None or centros_data is None or precios_data is None:
             st.error("No se pudieron obtener los datos geográficos. Verifica la conexión con la base de datos.")
         else:
             st.sidebar.subheader("Filtros de Barrios:")
@@ -231,6 +241,13 @@ def main():
                 show_metro_stations = True
 
             security_value = st.sidebar.slider("Nivel mínimo de seguridad (0 a 3):", 0, 3, 0)
+
+            # Price Category Filter
+            price_category = st.sidebar.radio(
+                "Categoría de Precio:", 
+                ("Todos", "Económico", "Medio", "Alto"),
+                help="Filtra barrios según su categoría de precio"
+            )
 
             need_educational_centers = st.sidebar.radio("¿Quieres filtrar por centros educativos?", ("No", "Sí"))
             selected_school_types = []
@@ -246,6 +263,27 @@ def main():
 
             if st.button("Aplicar filtros"):
                 filtered_barrios_data = barrios_data[barrios_data['criminalidad'] >= security_value]
+
+                # Price Filtering Logic
+                if price_category != "Todos":
+                    price_map = {"Económico": 1, "Medio": 2, "Alto": 3}
+                    selected_price_category = price_map.get(price_category)
+                    
+                    # Debug information
+                    st.write("Columns in filtered_barrios_data:", filtered_barrios_data.columns)
+                    st.write("Columns in precios_data:", precios_data.columns)
+                    
+                    # Merge price data with barrios data
+                    price_merged = filtered_barrios_data.merge(
+                        precios_data, 
+                        left_on='nombre',
+                        right_on='barrio',
+                        how='inner'
+                    )
+                    
+                    filtered_barrios_data = price_merged[
+                        price_merged['categoria_precio'] == selected_price_category
+                    ]
 
                 metro_data_filtered = filter_metro_within_barrios(metro_data, filtered_barrios_data)
                 if filter_metro_stations_only and show_metro_stations:
@@ -310,7 +348,11 @@ def main():
                     st.write("No hay barrios que cumplan las condiciones.")
 
                 st.subheader("Paradas de Metro Filtradas")
-                st.dataframe(metro_data_filtered)
+                if not metro_data_filtered.empty:
+                    metro_display = metro_data_filtered.drop(columns=['geometry'], errors='ignore')
+                    st.dataframe(metro_display)
+                else:
+                    st.write("No hay paradas de metro en los barrios seleccionados.")
 
                 if need_educational_centers == "Sí":
                     st.subheader("Centros Educativos Filtrados")
@@ -319,6 +361,14 @@ def main():
                         st.dataframe(filtered_centros_display)
                     else:
                         st.write("No hay centros educativos que cumplan las condiciones.")
+
+                if price_category != "Todos":
+                    st.subheader("Información de Precios")
+                    if not filtered_barrios_data.empty:
+                        price_info = filtered_barrios_data[['nombre', 'precio_2022', 'categoria_precio']].drop_duplicates()
+                        st.dataframe(price_info)
+                    else:
+                        st.write("No hay información de precios disponible para los barrios seleccionados.")
 
 if __name__ == "__main__":
     main()

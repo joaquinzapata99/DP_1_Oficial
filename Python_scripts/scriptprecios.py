@@ -24,29 +24,6 @@ def descargar_csv(url):
         print(f"Error al descargar el archivo: {e}")
         return None
 
-def validate_geo_shape(geo_shape_str):
-    """
-    Validate and clean geo_shape JSON string
-    
-    Args:
-        geo_shape_str (str): Geo shape JSON string
-    
-    Returns:
-        str or None: Valid GeoJSON string or None
-    """
-    try:
-        # Try to parse the JSON to ensure it's valid
-        geo_shape = json.loads(geo_shape_str)
-        
-        # Ensure it's a valid GeoJSON
-        if not isinstance(geo_shape, dict):
-            return None
-        
-        # Reserialize to ensure consistent formatting
-        return json.dumps(geo_shape)
-    except (json.JSONDecodeError, TypeError):
-        print(f"Invalid geo shape: {geo_shape_str}")
-        return None
 
 def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
     """
@@ -65,9 +42,6 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         conn = pg8000.connect(**db_config)
         cursor = conn.cursor()
 
-        # Asegurar que la extensión PostGIS está habilitada
-        cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
-
         # Cargar datos en un DataFrame
         data = pd.read_csv(StringIO(csv_data), delimiter=delimiter)
 
@@ -76,7 +50,7 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         
         # Convertir precio a numérico y quitar filas con datos faltantes
         data['Precio_2022 (Euros/m2)'] = pd.to_numeric(data['Precio_2022 (Euros/m2)'], errors='coerce')
-        filtered_data = data[['BARRIO', 'Geo Shape', 'Precio_2022 (Euros/m2)']].dropna()
+        filtered_data = data[['BARRIO', 'Precio_2022 (Euros/m2)']].dropna()
 
         # Categorizar precios en 3 niveles basados en los cuantiles de Precio_2022
         price_2022 = filtered_data['Precio_2022 (Euros/m2)']
@@ -95,7 +69,6 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         create_table_query = f"""
         CREATE TABLE {table_name} (
             Barrio TEXT,
-            Geo_Shape geometry(Geometry, 4326),
             Precio_2022 FLOAT,
             Categoria_Precio INTEGER
         );
@@ -105,8 +78,8 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         # Preparar la consulta de inserción fuera del bucle para eficiencia
         insert_query = f"""
         INSERT INTO {table_name} (
-            Barrio, Geo_Shape, Precio_2022, Categoria_Precio
-        ) VALUES (%s, ST_GeomFromGeoJSON(%s), %s, %s);
+            Barrio, Precio_2022, Categoria_Precio
+        ) VALUES (%s, %s, %s);
         """
 
         # Contador de filas insertadas
@@ -116,16 +89,9 @@ def cargar_datos_a_postgres(csv_data, table_name, db_config, delimiter=";"):
         # Insertar datos en la tabla
         for _, row in filtered_data.iterrows():
             try:
-                # Validar geo_shape
-                geo_shape = validate_geo_shape(row['Geo Shape'])
-                if not geo_shape:
-                    filas_fallidas += 1
-                    continue
-
                 # Intentar insertar la fila
                 cursor.execute(insert_query, (
                     str(row['BARRIO']), 
-                    geo_shape,
                     float(row['Precio_2022 (Euros/m2)']), 
                     int(row['Categoria_Precio'])
                 ))
