@@ -16,58 +16,45 @@ DB_CONFIG = {
 }
 
 def normalize_text(text):
-    """
-    Normalize text by removing accents and converting to lowercase
-    """
     if isinstance(text, str):
         return unicodedata.normalize('NFKD', text.lower()).encode('ASCII', 'ignore').decode('ASCII')
     return text
 
 def create_sqlalchemy_engine():
-    """Create SQLAlchemy engine using pg8000 dialect"""
     connection_string = f"postgresql+pg8000://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
     return create_engine(
         connection_string, 
-        pool_size=10,  # Maximum number of connections in the pool
-        max_overflow=20,  # Allow additional connections temporarily
-        pool_timeout=30,  # Wait time for a connection to become available
-        pool_recycle=1800  # Recycle connections after 30 minutes
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=30,
+        pool_recycle=1800
     )
 
 def fetch_data(table_name):
-    """Fetch data from PostgreSQL with enhanced error handling"""
     try:
-        # Use SQLAlchemy engine for connection
         engine = create_sqlalchemy_engine()
-
-        # Get column names from the table
         with engine.connect() as conn:
             columns_query = text(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'")
             result = conn.execute(columns_query)
             columns = result.fetchall()
 
-        # Detect geometry columns
         geo_columns = [col[0] for col in columns if 'geo' in col[0].lower() or 'shape' in col[0].lower() or 'point' in col[0].lower()]
         if not geo_columns:
             st.error(f"No geometry column found in table {table_name}")
             return None
 
-        geo_col = geo_columns[0]  # Use the first valid geometry column
+        geo_col = geo_columns[0]
         query = text(f"SELECT *, {geo_col} AS geometry FROM {table_name} LIMIT 500;")
 
-        # Read data using GeoPandas
         with engine.connect() as conn:
             data = gpd.read_postgis(query, conn, geom_col='geometry')
 
-        # Normalize columns for consistent filtering
         if 'regimen' in data.columns:
             data['regimen_normalized'] = data['regimen'].apply(normalize_text)
 
-        # Check for valid geometries and drop invalid ones
         data = data[data.geometry.notnull()]
         data = data[data.geometry.is_valid]
 
-        st.success(f"Successfully read data using geometry column: {geo_col}")
         return data
 
     except Exception as e:
@@ -75,16 +62,10 @@ def fetch_data(table_name):
         return None
 
 def filter_metro_within_barrios(metro_data, barrios_data):
-    """Filter metro stations to only those within the selected barrios"""
     try:
-        # Combine all polygons of selected districts
         combined_barrios_geometry = barrios_data.unary_union
-
-        # Ensure geometries are valid before filtering
         metro_data = metro_data[metro_data.geometry.notnull()]
         metro_data = metro_data[metro_data.geometry.is_valid]
-
-        # Filter metro stations within the selected districts
         metro_data_filtered = metro_data[metro_data.geometry.within(combined_barrios_geometry)]
         return metro_data_filtered
     except Exception as e:
@@ -92,21 +73,13 @@ def filter_metro_within_barrios(metro_data, barrios_data):
         return metro_data
 
 def filter_centers_within_barrios(centers_data, barrios_data, metro_data=None, filter_metro_stations_only=False):
-    """
-    Filter educational centers based on barrios and optional metro station requirement
-    """
     try:
-        # Combine all polygons of selected districts
         combined_barrios_geometry = barrios_data.unary_union
-
-        # Ensure geometries are valid before filtering
         centers_data = centers_data[centers_data.geometry.notnull()]
         centers_data = centers_data[centers_data.geometry.is_valid]
 
-        # Filter centers within the selected districts
         centers_in_barrios = centers_data[centers_data.geometry.within(combined_barrios_geometry)]
 
-        # If metro station filtering is enabled
         if filter_metro_stations_only and metro_data is not None:
             barrios_with_metro = barrios_data[barrios_data.geometry.intersects(metro_data.geometry.unary_union)]
             centers_filtered = centers_in_barrios[
@@ -115,24 +88,18 @@ def filter_centers_within_barrios(centers_data, barrios_data, metro_data=None, f
             return centers_filtered
 
         return centers_in_barrios
-
     except Exception as e:
         st.error(f"Error filtering educational centers: {e}")
         return centers_data
 
 def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_only, filtered_barrios_data, show_metro_stations, selected_school_types):
-    """Create an interactive Folium map with only the filtered barrios"""
-    m = folium.Map(location=[39.4699, -0.3763], zoom_start=12)  
-
-    # Color schemes
+    m = folium.Map(location=[39.4699, -0.3763], zoom_start=12)
     metro_color = 'red'
     selected_color = 'green'
     school_colors = {'publico': 'purple', 'concertado': 'orange', 'privado': 'blue'}
 
-    # Normalize selected school types
     normalized_selected_types = [normalize_text(st) for st in selected_school_types]
 
-    # Plot metro stations
     if show_metro_stations:
         metro_data = metro_data[metro_data.geometry.notnull()]
         for _, row in metro_data.iterrows():
@@ -148,7 +115,6 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
                 fillColor=metro_color
             ).add_to(m)
 
-    # Plot educational centers
     if len(centros_data) > 0:
         centros_data = centros_data[centros_data.geometry.notnull()]
         for _, row in centros_data.iterrows():
@@ -165,7 +131,6 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
                     fillColor=school_colors.get(row['regimen_normalized'], 'gray')
                 ).add_to(m)
 
-    # Plot filtered barrios
     filtered_barrios_data = filtered_barrios_data[filtered_barrios_data.geometry.notnull()]
     for _, row in filtered_barrios_data.iterrows():
         geometry = row.geometry
@@ -185,6 +150,34 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
 
     return m
 
+def save_demanda(barrios, email, nombre, apellidos):
+    engine = create_sqlalchemy_engine()
+    with engine.connect() as conn:
+        # Crear la tabla si no existe
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS demanda (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255),
+                nombre VARCHAR(255),
+                apellidos VARCHAR(255),
+                barrio VARCHAR(255),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        # Insertar datos
+        for b in barrios:
+            conn.execute(
+                text("INSERT INTO demanda (email, nombre, apellidos, barrio) VALUES (:email, :nombre, :apellidos, :barrio)"),
+                {"email": email, "nombre": nombre, "apellidos": apellidos, "barrio": b}
+            )
+        # Hacer commit de la transacción
+        conn.commit()
+
+def reset_session():
+    for key in st.session_state.keys():
+        del st.session_state[key]
+
 def main():
     st.set_page_config(
         page_title="Tindralencia 🔥", 
@@ -192,125 +185,140 @@ def main():
         layout="wide"
     )
 
+    if "step" not in st.session_state:
+        st.session_state.step = 1
+
+    if st.button("Nueva Consulta"):
+        reset_session()
+        st.session_state.step = 1
+
     st.title("Haz match con tu nuevo hogar 🌇")
-    st.markdown("""
-    ### Mapa interactivo parguela
-    Mira a ver cuál es tu sitio, que te veo desubicado **pinpin**
-    """)
 
-    with st.spinner('Fetching geographic data...'):
-        metro_data = fetch_data("paradas_metro")
-        barrios_data = fetch_data("barrios_valencia")
-        centros_data = fetch_data("centros_educativos")
-
-    if metro_data is not None and barrios_data is not None and centros_data is not None:
-        # Sidebar options
-        st.sidebar.subheader("Personaliza tu mapa:")
+    if st.session_state.step == 1:
+        # Paso 1: Solicitar datos del usuario
+        st.header("Introduce tus datos")
+        email = st.text_input("Email:")
+        nombre = st.text_input("Nombre:")
+        apellidos = st.text_input("Apellidos:")
         
-        #filtro de metro
-        st.sidebar.markdown("### ¿Usas el metro frecuentemente 🚇?")
-        response = st.sidebar.radio("¿Necesitas acceso al metro?", ("Sí", "No"))
-        filter_metro_stations_only = response == "Sí"
-
-        # Checkbox para mostrar paradas de metro (por defecto True)
-        show_metro_stations = st.sidebar.checkbox("Mostrar paradas de metro", value=True)
-        
-        # Si el usuario necesita acceso al metro, forzamos a mostrar las paradas de metro.
-        if filter_metro_stations_only:
-            show_metro_stations = True
-
-        st.sidebar.markdown("### ¿Cuánto valoras la seguridad de tu barrio? 🚔")
-        security_value = st.sidebar.slider("Selecciona el nivel mínimo de seguridad:", 0, 3, 0)
-        
-        # Preguntar si se desean centros educativos
-        st.sidebar.markdown("### ¿Necesitas centros educativos cerca? 🏫")
-        need_educational_centers = st.sidebar.radio("¿Quieres filtrar por centros educativos?", ("No", "Sí"))
-
-        selected_school_types = []
-        # Si el usuario quiere centros educativos, mostrar el filtro por tipo
-        if need_educational_centers == "Sí":
-            selected_school_types = st.sidebar.multiselect(
-                "Selecciona los tipos de centros:",
-                ['publico', 'concertado', 'privado'],
-                default=['publico', 'concertado', 'privado']
-            )
-
-        # Aplicar filtros de barrios según el nivel de seguridad
-        filtered_barrios_data = barrios_data[barrios_data['criminalidad'] >= security_value]
-
-        # Filtrar paradas de metro en función de los barrios seleccionados
-        metro_data_filtered = filter_metro_within_barrios(metro_data, filtered_barrios_data)
-
-        # Si se requieren barrios con metro
-        if filter_metro_stations_only and show_metro_stations:
-            filtered_barrios_data = filtered_barrios_data[
-                filtered_barrios_data.geometry.intersects(metro_data_filtered.geometry.unary_union)
-            ]
-
-        # Filtrar centros educativos solo si el usuario quiere centros educativos cerca
-        if need_educational_centers == "Sí":
-            centros_data_filtered = filter_centers_within_barrios(
-                centros_data, 
-                filtered_barrios_data, 
-                metro_data, 
-                filter_metro_stations_only
-            )
-            # Filtrar por tipos seleccionados
-            centros_data_filtered = centros_data_filtered[centros_data_filtered['regimen_normalized'].isin([normalize_text(t) for t in selected_school_types])]
-            
-            # Refiltrar barrios para que solo queden los que contengan centros educativos filtrados
-            if len(centros_data_filtered) > 0:
-                filtered_barrios_data = filtered_barrios_data[
-                    filtered_barrios_data.geometry.intersects(centros_data_filtered.unary_union)
-                ]
+        if st.button("Continuar"):
+            if email and nombre and apellidos:
+                st.session_state.email = email
+                st.session_state.nombre = nombre
+                st.session_state.apellidos = apellidos
+                st.session_state.step = 2
             else:
-                # Si no hay centros educativos que cumplan las condiciones, no se muestran barrios
-                filtered_barrios_data = gpd.GeoDataFrame(columns=filtered_barrios_data.columns)
+                st.warning("Por favor, rellena todos los campos antes de continuar.")
+
+    elif st.session_state.step == 2:
+        # Paso 2: Aplicar filtros
+        st.header(f"Hola {st.session_state.nombre}, personaliza tu mapa:")
+
+        with st.spinner('Cargando datos geográficos...'):
+            metro_data = fetch_data("paradas_metro")
+            barrios_data = fetch_data("barrios_valencia")
+            centros_data = fetch_data("centros_educativos")
+
+        if metro_data is None or barrios_data is None or centros_data is None:
+            st.error("No se pudieron obtener los datos geográficos. Verifica la conexión con la base de datos.")
         else:
-            # El usuario no quiere filtrar centros, por lo que no se mostrarán
-            centros_data_filtered = pd.DataFrame(columns=centros_data.columns)
+            st.sidebar.subheader("Filtros de Barrios:")
+            response = st.sidebar.radio("¿Necesitas acceso al metro?", ("Sí", "No"))
+            filter_metro_stations_only = (response == "Sí")
 
-        # Debug: Display the count of filtered results
-        print(f"Filtered Barrios: {len(filtered_barrios_data)}")
-        print(f"Filtered Metro Stations: {len(metro_data_filtered)}")
-        print(f"Filtered Educational Centers: {len(centros_data_filtered)}")
+            show_metro_stations = st.sidebar.checkbox("Mostrar paradas de metro", value=True)
+            if filter_metro_stations_only:
+                show_metro_stations = True
 
-        # Tabs for displaying data
-        tab1, tab2, tab3, tab4 = st.tabs(["Mapa", "Paradas de Metro", "Barrios", "Centros Educativos"])
+            security_value = st.sidebar.slider("Nivel mínimo de seguridad (0 a 3):", 0, 3, 0)
 
-        with tab1:
-            st.subheader("Mapa Interactivo")
-            # Aquí pasamos barrios_data original como segundo parámetro, y filtered_barrios_data en el quinto.
-            m = create_map(
-                metro_data_filtered, 
-                barrios_data, 
-                centros_data_filtered, 
-                filter_metro_stations_only, 
-                filtered_barrios_data, 
-                show_metro_stations, 
-                selected_school_types
-            )
-            st_folium(m, width=900, height=600)
-
-        with tab2:
-            st.subheader("Detalles de las Paradas de Metro")
-            st.dataframe(metro_data_filtered)
-
-        with tab3:
-            st.subheader("Detalles de los Barrios")
-            filtered_barrios_display = filtered_barrios_data.drop(columns=['geometry'], errors='ignore')
-            st.dataframe(filtered_barrios_display)
-
-        with tab4:
-            st.subheader("Detalles de los Centros Educativos")
+            need_educational_centers = st.sidebar.radio("¿Quieres filtrar por centros educativos?", ("No", "Sí"))
+            selected_school_types = []
             if need_educational_centers == "Sí":
-                filtered_centros_display = centros_data_filtered.drop(columns=['geometry', 'geo_point'], errors='ignore')
-                st.dataframe(filtered_centros_display)
-            else:
-                st.write("No se han filtrado centros educativos.")
+                selected_school_types = st.sidebar.multiselect(
+                    "Tipos de centros:",
+                    ['publico', 'concertado', 'privado'],
+                    default=['publico', 'concertado', 'privado']
+                )
 
-    else:
-        st.error("No se pudieron obtener los datos geográficos. Verifica la conexión con la base de datos.")
+            if "show_results" not in st.session_state:
+                st.session_state.show_results = False
+
+            if st.button("Aplicar filtros"):
+                filtered_barrios_data = barrios_data[barrios_data['criminalidad'] >= security_value]
+
+                metro_data_filtered = filter_metro_within_barrios(metro_data, filtered_barrios_data)
+                if filter_metro_stations_only and show_metro_stations:
+                    filtered_barrios_data = filtered_barrios_data[
+                        filtered_barrios_data.geometry.intersects(metro_data_filtered.geometry.unary_union)
+                    ]
+
+                if need_educational_centers == "Sí":
+                    centros_data_filtered = filter_centers_within_barrios(
+                        centros_data, filtered_barrios_data, metro_data, filter_metro_stations_only
+                    )
+                    centros_data_filtered = centros_data_filtered[centros_data_filtered['regimen_normalized'].isin([normalize_text(t) for t in selected_school_types])]
+
+                    if len(centros_data_filtered) > 0:
+                        filtered_barrios_data = filtered_barrios_data[
+                            filtered_barrios_data.geometry.intersects(centros_data_filtered.unary_union)
+                        ]
+                    else:
+                        filtered_barrios_data = gpd.GeoDataFrame(columns=filtered_barrios_data.columns)
+                else:
+                    centros_data_filtered = pd.DataFrame(columns=centros_data.columns)
+
+                st.session_state.filtered_barrios_data = filtered_barrios_data
+                st.session_state.metro_data_filtered = metro_data_filtered
+                st.session_state.centros_data_filtered = centros_data_filtered
+                st.session_state.show_results = True
+
+                # Guardar en la tabla demanda los barrios filtrados junto con los datos del usuario
+                if 'nombre' in filtered_barrios_data.columns:
+                    barrios_optimos = filtered_barrios_data['nombre'].unique().tolist()
+                else:
+                    barrios_optimos = []
+                
+                if barrios_optimos:
+                    save_demanda(barrios_optimos, st.session_state.email, st.session_state.nombre, st.session_state.apellidos)
+                    st.success("Datos guardados en la tabla 'demanda'.")
+                else:
+                    st.warning("No hay barrios que cumplan las condiciones para guardar en demanda.")
+
+            if st.session_state.show_results:
+                filtered_barrios_data = st.session_state.filtered_barrios_data
+                metro_data_filtered = st.session_state.metro_data_filtered
+                centros_data_filtered = st.session_state.centros_data_filtered
+
+                st.subheader("Mapa Interactivo")
+                m = create_map(
+                    metro_data_filtered, 
+                    barrios_data, 
+                    centros_data_filtered, 
+                    filter_metro_stations_only, 
+                    filtered_barrios_data, 
+                    show_metro_stations, 
+                    selected_school_types
+                )
+                st_folium(m, width=900, height=600)
+
+                st.subheader("Detalles de los Barrios")
+                if not filtered_barrios_data.empty:
+                    filtered_barrios_display = filtered_barrios_data.drop(columns=['geometry'], errors='ignore')
+                    st.dataframe(filtered_barrios_display)
+                else:
+                    st.write("No hay barrios que cumplan las condiciones.")
+
+                st.subheader("Paradas de Metro Filtradas")
+                st.dataframe(metro_data_filtered)
+
+                if need_educational_centers == "Sí":
+                    st.subheader("Centros Educativos Filtrados")
+                    if not centros_data_filtered.empty:
+                        filtered_centros_display = centros_data_filtered.drop(columns=['geometry', 'geo_point'], errors='ignore')
+                        st.dataframe(filtered_centros_display)
+                    else:
+                        st.write("No hay centros educativos que cumplan las condiciones.")
 
 if __name__ == "__main__":
     main()
