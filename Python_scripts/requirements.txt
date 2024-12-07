@@ -7,3 +7,4 @@ folium
 sqlalchemy
 streamlit-folium
 openai
+geopy
