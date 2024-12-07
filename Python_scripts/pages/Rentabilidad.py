@@ -65,7 +65,7 @@ def fetch_filtered_purchase_data(habitaciones, banos, ascensor, parking):
         # Query to compute average purchase cost
         query = """
             SELECT barrio, AVG(precio) AS avg_apartment_cost
-            FROM anuncios
+            FROM compras
             WHERE habitaciones = %s
             AND banos = %s
             AND ascensor = %s
