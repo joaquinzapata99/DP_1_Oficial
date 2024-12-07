@@ -1,9 +1,83 @@
+import os
 import pandas as pd
 import pg8000
-import streamlit as st
 
+def cargar_datos_a_postgres(csv_path, table_name, db_config, delimiter=";"):
+    conn = None
+    cursor = None
+    try:
+        # Load data with explicit dtype handling
+        data = pd.read_csv(csv_path, delimiter=delimiter, 
+                            dtype={
+                                'Id del anuncio': int,
+                                'Habitaciones': int,
+                                'Baños': int,
+                                'Precio': float
+                            })
+        
+        # Remove duplicate rows based on 'Id del anuncio'
+        data = data.drop_duplicates(subset=['Id del anuncio'])
 
-# Database Configuration
+        # Normalize boolean columns
+        data['Ascensor (Sí/No)'] = data['Ascensor (Sí/No)'].map({'Sí': True, 'No': False})
+        data['Parking (Sí/No)'] = data['Parking (Sí/No)'].map({'Sí': True, 'No': False})
+
+        # Connect to PostgreSQL
+        conn = pg8000.connect(**db_config)
+        conn.autocommit = False  # Explicitly manage transactions
+        cursor = conn.cursor()
+
+        # Drop and recreate table
+        cursor.execute(f"DROP TABLE IF EXISTS {table_name};")
+        create_table_query = f"""
+        CREATE TABLE {table_name} (
+            id_anuncio BIGINT PRIMARY KEY,
+            tipo_inmueble TEXT,
+            direccion TEXT,
+            precio NUMERIC,
+            habitaciones INTEGER,
+            banos INTEGER,
+            barrio TEXT,
+            ascensor BOOLEAN,
+            parking BOOLEAN
+        );
+        """
+        cursor.execute(create_table_query)
+
+        # Prepare insert statement
+        insert_query = f"""
+        INSERT INTO {table_name} (
+            id_anuncio, tipo_inmueble, direccion, precio, 
+            habitaciones, banos, barrio, ascensor, parking
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (id_anuncio) DO NOTHING;
+        """
+
+        # Batch insert
+        values = data[['Id del anuncio', 'Tipo de inmueble', 'Dirección', 'Precio', 
+                      'Habitaciones', 'Baños', 'Barrio', 'Ascensor (Sí/No)', 'Parking (Sí/No)']].values.tolist()
+        
+        cursor.executemany(insert_query, values)
+
+        # Commit transaction
+        conn.commit()
+        print(f"Datos cargados en la tabla '{table_name}' correctamente.")
+
+    except Exception as e:
+        print(f"Error al cargar los datos en PostgreSQL: {e}")
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        # Close cursor and connection safely
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+# Configuration
+RUTA_CSV = "/app/IdeaDatos/compras_total .csv"
+NOMBRE_TABLA = "compras"
 CONFIG_DB = {
     "host": "postgres",
     "port": 5432,
@@ -12,131 +86,6 @@ CONFIG_DB = {
     "password": "postgres",
 }
 
-
-# Connect to PostgreSQL
-def connect_to_db():
-    conn = pg8000.connect(**CONFIG_DB)
-    cursor = conn.cursor()
-    return conn, cursor
-
-
-# Fetch filtered rental data (average monthly rent)
-def fetch_filtered_rental_data(habitaciones, banos, ascensor, parking):
-    conn, cursor = connect_to_db()
-
-    try:
-        # Map 'Sí'/'No' to boolean values
-        ascensor_boolean = True if ascensor == "Sí" else False
-        parking_boolean = True if parking == "Sí" else False
-
-        # Query to compute average monthly rent
-        query = """
-            SELECT barrio, AVG(precio) AS promedio_renta
-            FROM alquileres
-            WHERE habitaciones = %s
-            AND banos = %s
-            AND ascensor = %s
-            AND parking = %s
-            GROUP BY barrio
-        """
-
-        cursor.execute(query, (habitaciones, banos, ascensor_boolean, parking_boolean))
-        data = pd.DataFrame(cursor.fetchall(), columns=["barrio", "promedio_renta"])
-
-    except Exception as e:
-        st.error(f"Database query error in rental data fetch: {e}")
-        data = pd.DataFrame()
-    finally:
-        cursor.close()
-        conn.close()
-
-    return data
-
-
-# Fetch filtered purchase data (average purchase cost)
-def fetch_filtered_purchase_data(habitaciones, banos, ascensor, parking):
-    conn, cursor = connect_to_db()
-
-    try:
-        # Map 'Sí'/'No' to boolean values
-        ascensor_boolean = True if ascensor == "Sí" else False
-        parking_boolean = True if parking == "Sí" else False
-
-        # Query to compute average purchase cost
-        query = """
-            SELECT barrio, AVG(precio) AS avg_apartment_cost
-            FROM anuncios
-            WHERE habitaciones = %s
-            AND banos = %s
-            AND ascensor = %s
-            AND parking = %s
-            GROUP BY barrio
-        """
-
-        cursor.execute(query, (habitaciones, banos, ascensor_boolean, parking_boolean))
-        data = pd.DataFrame(cursor.fetchall(), columns=["barrio", "avg_apartment_cost"])
-
-    except Exception as e:
-        st.error(f"Database query error in purchase data fetch: {e}")
-        data = pd.DataFrame()
-    finally:
-        cursor.close()
-        conn.close()
-
-    return data
-
-
-# Streamlit App - Calculate Rentability
-st.title("Apartment Rentability Analysis")
-
-st.sidebar.header("Filter Options")
-
-# Sidebar filters
-num_habitaciones = st.sidebar.slider(
-    "Select number of habitaciones:",
-    min_value=1,
-    max_value=5,
-    value=3
-)
-
-num_banos = st.sidebar.slider(
-    "Select number of baños:",
-    min_value=1,
-    max_value=3,
-    value=1
-)
-
-ascensor = st.sidebar.selectbox(
-    "Has elevator (ascensor)?", options=["Sí", "No"], index=0
-)
-
-parking = st.sidebar.selectbox(
-    "Has parking?", options=["Sí", "No"], index=0
-)
-
-# Fetch filtered rental and purchase data
-rental_data = fetch_filtered_rental_data(num_habitaciones, num_banos, ascensor, parking)
-purchase_data = fetch_filtered_purchase_data(num_habitaciones, num_banos, ascensor, parking)
-
-# Ensure data exists
-if rental_data.empty or purchase_data.empty:
-    st.warning("No data found for these filters. Try modifying the selection criteria.")
-else:
-    # Merge the rental and purchase data on 'barrio' for analysis
-    analysis_df = pd.merge(
-        rental_data,
-        purchase_data,
-        how="inner",
-        on="barrio"
-    )
-
-    # Compute the annual income and rentability percentage dynamically
-    analysis_df["Anual_Income"] = analysis_df["promedio_renta"] * 12
-    analysis_df["Rentability_%"] = (analysis_df["Anual_Income"] / analysis_df["avg_apartment_cost"]) * 100
-
-    # Sort the data by calculated rentability percentage
-    analysis_df_sorted = analysis_df.sort_values(by="Rentability_%", ascending=False)
-
-    # Display results
-    st.write(f"Dynamic Rentability Analysis for {num_habitaciones} habitaciones, {num_banos} baños, elevator={ascensor}, parking={parking}:")
-    st.table(analysis_df_sorted[["barrio", "promedio_renta", "avg_apartment_cost", "Anual_Income", "Rentability_%"]])
+# Run script
+if __name__ == "__main__":
+    cargar_datos_a_postgres(RUTA_CSV, NOMBRE_TABLA, CONFIG_DB)
