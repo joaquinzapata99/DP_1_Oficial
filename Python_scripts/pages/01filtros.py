@@ -292,8 +292,8 @@ def reset_session():
 
 def main():
     st.set_page_config(
-        page_title="Tindralencia 🔥", 
-        page_icon=":house:", 
+        page_title="Filtrado", 
+        page_icon=":mag:", 
         layout="wide"
     )
 
