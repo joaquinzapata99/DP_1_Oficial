@@ -6,6 +6,7 @@ import folium
 from sqlalchemy import create_engine, text
 import unicodedata
 import numpy as np
+from contextlib import contextmanager
 
 # Enhanced Database Configuration
 DB_CONFIG = {
@@ -16,33 +17,46 @@ DB_CONFIG = {
     "password": "postgres",
 }
 
+# Create a single engine instance for the application
+@st.cache_resource
+def get_database_engine():
+    connection_string = f"postgresql+pg8000://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+    return create_engine(
+        connection_string,
+        pool_size=5,  # Reduced pool size
+        max_overflow=10,  # Reduced max overflow
+        pool_timeout=30,
+        pool_recycle=1800,
+        pool_pre_ping=True  # Enable connection health checks
+    )
+
+@contextmanager
+def get_connection():
+    """Context manager for database connections"""
+    engine = get_database_engine()
+    connection = engine.connect()
+    try:
+        yield connection
+    finally:
+        connection.close()
+
 def normalize_text(text):
     if isinstance(text, str):
         return unicodedata.normalize('NFKD', text.lower()).encode('ASCII', 'ignore').decode('ASCII')
     return text
 
-def create_sqlalchemy_engine():
-    connection_string = f"postgresql+pg8000://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
-    return create_engine(
-        connection_string, 
-        pool_size=10,
-        max_overflow=20,
-        pool_timeout=30,
-        pool_recycle=1800
-    )
-
 def fetch_data(table_name):
     try:
-        engine = create_sqlalchemy_engine()
-        with engine.connect() as conn:
+        # Get column information
+        with get_connection() as conn:
             columns_query = text(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'")
             result = conn.execute(columns_query)
             columns = result.fetchall()
 
         # Price data handling
         if table_name == 'precios_barrios':
-            query = text(f"SELECT * FROM {table_name};")
-            with engine.connect() as conn:
+            with get_connection() as conn:
+                query = text(f"SELECT * FROM {table_name};")
                 price_data = pd.read_sql(query, conn)
             return price_data
 
@@ -55,7 +69,7 @@ def fetch_data(table_name):
         geo_col = geo_columns[0]
         query = text(f"SELECT *, {geo_col} AS geometry FROM {table_name} LIMIT 500;")
 
-        with engine.connect() as conn:
+        with get_connection() as conn:
             data = gpd.read_postgis(query, conn, geom_col='geometry')
 
         if 'regimen' in data.columns:
@@ -160,28 +174,29 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
     return m
 
 def save_demanda(barrios, email, nombre, apellidos):
-    engine = create_sqlalchemy_engine()
-    with engine.connect() as conn:
-        # Crear la tabla si no existe
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS demanda (
-                id SERIAL PRIMARY KEY,
-                email VARCHAR(255),
-                nombre VARCHAR(255),
-                apellidos VARCHAR(255),
-                barrio VARCHAR(255),
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
+    try:
+        with get_connection() as conn:
+            # Create table if it doesn't exist
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS demanda (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(255),
+                    nombre VARCHAR(255),
+                    apellidos VARCHAR(255),
+                    barrio VARCHAR(255),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
 
-        # Insertar datos
-        for b in barrios:
-            conn.execute(
-                text("INSERT INTO demanda (email, nombre, apellidos, barrio) VALUES (:email, :nombre, :apellidos, :barrio)"),
-                {"email": email, "nombre": nombre, "apellidos": apellidos, "barrio": b}
-            )
-        # Hacer commit de la transacción
-        conn.commit()
+            # Insert data
+            for b in barrios:
+                conn.execute(
+                    text("INSERT INTO demanda (email, nombre, apellidos, barrio) VALUES (:email, :nombre, :apellidos, :barrio)"),
+                    {"email": email, "nombre": nombre, "apellidos": apellidos, "barrio": b}
+                )
+            conn.commit()
+    except Exception as e:
+        st.error(f"Error saving demand data: {e}")
 
 def reset_session():
     for key in st.session_state.keys():
@@ -269,10 +284,6 @@ def main():
                     price_map = {"Económico": 1, "Medio": 2, "Alto": 3}
                     selected_price_category = price_map.get(price_category)
                     
-                    # Debug information
-                    st.write("Columns in filtered_barrios_data:", filtered_barrios_data.columns)
-                    st.write("Columns in precios_data:", precios_data.columns)
-                    
                     # Merge price data with barrios data
                     price_merged = filtered_barrios_data.merge(
                         precios_data, 
@@ -295,7 +306,9 @@ def main():
                     centros_data_filtered = filter_centers_within_barrios(
                         centros_data, filtered_barrios_data, metro_data, filter_metro_stations_only
                     )
-                    centros_data_filtered = centros_data_filtered[centros_data_filtered['regimen_normalized'].isin([normalize_text(t) for t in selected_school_types])]
+                    centros_data_filtered = centros_data_filtered[
+                        centros_data_filtered['regimen_normalized'].isin([normalize_text(t) for t in selected_school_types])
+                    ]
 
                     if len(centros_data_filtered) > 0:
                         filtered_barrios_data = filtered_barrios_data[
@@ -311,7 +324,7 @@ def main():
                 st.session_state.centros_data_filtered = centros_data_filtered
                 st.session_state.show_results = True
 
-                # Guardar en la tabla demanda los barrios filtrados junto con los datos del usuario
+                # Save to demand table
                 if 'nombre' in filtered_barrios_data.columns:
                     barrios_optimos = filtered_barrios_data['nombre'].unique().tolist()
                 else:
@@ -371,9 +384,6 @@ def main():
                             st.warning(f"No se encuentran todas las columnas requeridas: {columnas_a_mostrar}")
                     else:
                         st.info("No hay centros educativos disponibles para mostrar.")
-
-
-
                         
                 if price_category != "Todos":
                     st.subheader("Información de Precios")
