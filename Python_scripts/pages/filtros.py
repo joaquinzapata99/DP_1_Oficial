@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, text
 import unicodedata
 import numpy as np
 from contextlib import contextmanager
+from branca.element import Template, MacroElement
 
 # Enhanced Database Configuration
 DB_CONFIG = {
@@ -123,9 +124,96 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
 
     normalized_selected_types = [normalize_text(st) for st in selected_school_types]
 
+    # Create legend template with updated styling
+    legend_template = """
+    {% macro html(this, kwargs) %}
+    <div id='maplegend' class='maplegend' 
+        style='position: absolute; z-index: 9999; background-color: white;
+         border-radius: 6px; padding: 10px; font-size: 12px; right: 100px; top: 20px;
+         border: 2px solid gray; box-shadow: 0 0 15px rgba(0,0,0,0.2);
+         color: black;'>
+         
+    <div class='legend-title' style='margin-bottom: 10px; font-weight: bold; color: black;'>Leyenda</div>
+    <div class='legend-scale'>
+      <ul class='legend-labels'>
+        <li><span style='background: green; opacity: 0.5;'></span>Barrios seleccionados</li>
+    """
+
     if show_metro_stations:
-        metro_data = metro_data[metro_data.geometry.notnull()]
-        for _, row in metro_data.iterrows():
+        legend_template += """
+        <li><span style='background: red; border-radius: 50%;'></span>Paradas de metro</li>
+        """
+
+    for school_type in selected_school_types:
+        color = school_colors.get(school_type)
+        label = {
+            'publico': 'Centros públicos',
+            'concertado': 'Centros concertados',
+            'privado': 'Centros privados'
+        }.get(school_type)
+        if color and label:
+            legend_template += f"""
+            <li><span style='background: {color}; border-radius: 50%;'></span>{label}</li>
+            """
+
+    legend_template += """
+      </ul>
+    </div>
+    </div>
+    <style type='text/css'>
+      .maplegend {
+        color: black;
+      }
+      .maplegend .legend-title {
+        text-align: left;
+        margin-bottom: 5px;
+        font-weight: bold;
+        font-size: 90%;
+        }
+      .maplegend .legend-scale ul {
+        margin: 0;
+        margin-bottom: 5px;
+        padding: 0;
+        float: left;
+        list-style: none;
+        }
+      .maplegend .legend-scale ul li {
+        font-size: 80%;
+        list-style: none;
+        margin-left: 0;
+        line-height: 18px;
+        margin-bottom: 2px;
+        color: black;
+        }
+      .maplegend ul.legend-labels li span {
+        display: block;
+        float: left;
+        height: 16px;
+        width: 16px;
+        margin-right: 5px;
+        margin-left: 0;
+        border: 1px solid #999;
+        }
+    </style>
+    {% endmacro %}
+    """
+
+    # Create MacroElement and add to map
+    macro = MacroElement()
+    macro._name = "legend"
+    macro._template = Template(legend_template)
+    m.get_root().add_child(macro)
+
+    # Add map features
+    if show_metro_stations:
+        filtered_metro = metro_data[
+            metro_data.geometry.apply(
+                lambda point: any(point.within(barrio_geom) for barrio_geom in filtered_barrios_data.geometry)
+            )
+        ]
+        
+        filtered_metro = filtered_metro[filtered_metro.geometry.notnull()]
+        for _, row in filtered_metro.iterrows():
             point = row.geometry
             if point.is_empty:
                 continue
@@ -284,7 +372,6 @@ def main():
                     price_map = {"Económico": 1, "Medio": 2, "Alto": 3}
                     selected_price_category = price_map.get(price_category)
                     
-                    # Merge price data with barrios data
                     price_merged = filtered_barrios_data.merge(
                         precios_data, 
                         left_on='nombre',
@@ -371,14 +458,10 @@ def main():
                     st.subheader("Centros Educativos Filtrados")
     
                     if not centros_data_filtered.empty:
-                        # Asegúrate de que las columnas que deseas mostrar están presentes
                         columnas_a_mostrar = ['nombre', 'regimen', 'direccion', 'mail', 'telef', 'dgenerica_', 'despecific']
-        
-                        # Verifica qué columnas están disponibles en los datos
                         columnas_presentes = [col for col in columnas_a_mostrar if col in centros_data_filtered.columns]
         
                         if columnas_presentes:
-                            # Simplemente muestra todas las columnas relevantes, sin aplicar filtros
                             st.dataframe(centros_data_filtered[columnas_presentes])
                         else:
                             st.warning(f"No se encuentran todas las columnas requeridas: {columnas_a_mostrar}")
