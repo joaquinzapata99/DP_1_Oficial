@@ -90,31 +90,31 @@ def fetch_filtered_purchase_data(habitaciones, banos, ascensor, parking):
     return data
 
 # Streamlit App - Calculate Rentability
-st.title("Apartment Rentability Analysis")
+st.title("Invierte con Nosotros")
 
 st.sidebar.header("Filter Options")
 
 # Sidebar filters
 num_habitaciones = st.sidebar.slider(
-    "Select number of habitaciones:",
+    "Numero de habitaciones:",
     min_value=1,
     max_value=5,
     value=3
 )
 
 num_banos = st.sidebar.slider(
-    "Select number of baños:",
+    "Numero de baños:",
     min_value=1,
     max_value=3,
     value=1
 )
 
 ascensor = st.sidebar.selectbox(
-    "Has elevator (ascensor)?", options=["Sí", "No"], index=0
+    "Con ascensor?", options=["Sí", "No"], index=0
 )
 
 parking = st.sidebar.selectbox(
-    "Has parking?", options=["Sí", "No"], index=0
+    "Con parking?", options=["Sí", "No"], index=0
 )
 
 # Fetch filtered rental and purchase data
@@ -157,5 +157,5 @@ else:
     })
 
     # Display results
-    st.write(f"Dynamic Rentability Analysis for {num_habitaciones} habitaciones, {num_banos} baños, elevator={ascensor}, parking={parking}:")
+    st.write(f"Rentabilidad esperada por {num_habitaciones} habitaciones, {num_banos} baños, ascensor: {ascensor}, parking: {parking}:")
     st.table(display_df[["Barrio", "Alquiler Mensual", "Precio de Venta", "Renta Anual", "Rentabilidad"]])
