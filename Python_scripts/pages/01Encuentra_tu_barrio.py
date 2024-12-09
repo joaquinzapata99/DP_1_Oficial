@@ -24,11 +24,11 @@ def get_database_engine():
     connection_string = f"postgresql+pg8000://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
     return create_engine(
         connection_string,
-        pool_size=5,  # Reduced pool size
-        max_overflow=10,  # Reduced max overflow
+        pool_size=5,
+        max_overflow=10,
         pool_timeout=30,
         pool_recycle=1800,
-        pool_pre_ping=True  # Enable connection health checks
+        pool_pre_ping=True
     )
 
 @contextmanager
@@ -261,7 +261,7 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
 
     return m
 
-def save_demanda(barrios, email, nombre, apellidos):
+def save_demanda(barrios, email, nombre, apellidos, transaction_type):
     try:
         with get_connection() as conn:
             # Create table if it doesn't exist
@@ -272,6 +272,7 @@ def save_demanda(barrios, email, nombre, apellidos):
                     nombre VARCHAR(255),
                     apellidos VARCHAR(255),
                     barrio VARCHAR(255),
+                    tipo_transaccion VARCHAR(50),
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
@@ -279,8 +280,8 @@ def save_demanda(barrios, email, nombre, apellidos):
             # Insert data
             for b in barrios:
                 conn.execute(
-                    text("INSERT INTO demanda (email, nombre, apellidos, barrio) VALUES (:email, :nombre, :apellidos, :barrio)"),
-                    {"email": email, "nombre": nombre, "apellidos": apellidos, "barrio": b}
+                    text("INSERT INTO demanda (email, nombre, apellidos, barrio, tipo_transaccion) VALUES (:email, :nombre, :apellidos, :barrio, :tipo_transaccion)"),
+                    {"email": email, "nombre": nombre, "apellidos": apellidos, "barrio": b, "tipo_transaccion": transaction_type}
                 )
             conn.commit()
     except Exception as e:
@@ -336,6 +337,13 @@ def main():
             st.error("No se pudieron obtener los datos geográficos. Verifica la conexión con la base de datos.")
         else:
             st.sidebar.subheader("Filtros de Barrios:")
+            
+            # Transaction type selection
+            transaction_type = st.sidebar.radio(
+                "¿Buscas comprar o alquilar?",
+                ("Alquilar", "Comprar")
+            )
+            
             response = st.sidebar.radio("¿Necesitas acceso al metro?", ("Sí", "No"))
             filter_metro_stations_only = (response == "Sí")
 
@@ -345,10 +353,25 @@ def main():
 
             security_value = st.sidebar.slider("Nivel mínimo de seguridad (0 a 3):", 0, 3, 0)
 
-            # Price Category Filter
+            # Price Category Filter based on transaction type
+            if transaction_type == "Alquilar":
+                price_options = {
+                    "Todos": 0,
+                    "Económico (600€ - 800€/mes)": 1,
+                    "Medio (800€ - 1100€/mes)": 2,
+                    "Alto (>1100€/mes)": 3
+                }
+            else:  # Comprar
+                price_options = {
+                    "Todos": 0,
+                    "Económico (150k€ - 200k€)": 1,
+                    "Medio (200k€ - 300k€)": 2,
+                    "Alto (>300k€)": 3
+                }
+
             price_category = st.sidebar.radio(
-                "Categoría de Precio:", 
-                ("Todos", "Económico", "Medio", "Alto"),
+                "Categoría de Precio:",
+                options=list(price_options.keys()),
                 help="Filtra barrios según su categoría de precio"
             )
 
@@ -369,7 +392,19 @@ def main():
 
                 # Price Filtering Logic
                 if price_category != "Todos":
-                    price_map = {"Económico": 1, "Medio": 2, "Alto": 3}
+                    if transaction_type == "Alquilar":
+                        price_map = {
+                            "Económico (600€ - 800€/mes)": 1,
+                            "Medio (800€ - 1100€/mes)": 2,
+                            "Alto (>1100€/mes)": 3
+                        }
+                    else:  # Comprar
+                        price_map = {
+                            "Económico (150k€ - 200k€)": 1,
+                            "Medio (200k€ - 300k€)": 2,
+                            "Alto (>300k€)": 3
+                        }
+                    
                     selected_price_category = price_map.get(price_category)
                     
                     price_merged = filtered_barrios_data.merge(
@@ -411,14 +446,20 @@ def main():
                 st.session_state.centros_data_filtered = centros_data_filtered
                 st.session_state.show_results = True
 
-                # Save to demand table
+                # Save to demand table with transaction type
                 if 'nombre' in filtered_barrios_data.columns:
                     barrios_optimos = filtered_barrios_data['nombre'].unique().tolist()
                 else:
                     barrios_optimos = []
                 
                 if barrios_optimos:
-                    save_demanda(barrios_optimos, st.session_state.email, st.session_state.nombre, st.session_state.apellidos)
+                    save_demanda(
+                        barrios_optimos, 
+                        st.session_state.email, 
+                        st.session_state.nombre, 
+                        st.session_state.apellidos,
+                        transaction_type
+                    )
                     st.success("Datos guardados en la tabla 'demanda'.")
                 else:
                     st.warning("No hay barrios que cumplan las condiciones para guardar en demanda.")
@@ -471,7 +512,13 @@ def main():
                 if price_category != "Todos":
                     st.subheader("Información de Precios")
                     if not filtered_barrios_data.empty:
+                        if transaction_type == "Alquilar":
+                            price_label = "Precio de Alquiler"
+                        else:
+                            price_label = "Precio de Venta"
+                            
                         price_info = filtered_barrios_data[['nombre', 'precio_2022', 'categoria_precio']].drop_duplicates()
+                        price_info.columns = ['Barrio', price_label, 'Categoría']
                         st.dataframe(price_info)
                     else:
                         st.write("No hay información de precios disponible para los barrios seleccionados.")
