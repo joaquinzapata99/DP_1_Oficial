@@ -11,6 +11,7 @@ COPY scriptcompras.py scriptcompras.py
 COPY scriptalquileres.py scriptalquileres.py
 COPY scriptprecios.py scriptprecios.py
 COPY scriptdemanda.py scriptdemanda.py
+COPY scriptjuegos.py scriptjuegos.py
 
 COPY entrypoint.sh entrypoint.sh
 

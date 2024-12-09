@@ -22,5 +22,8 @@ python scriptalquileres.py
 echo "Ejecutando demanda..."
 python scriptdemanda.py
 
+echo "Ejecutando parques infantiles"
+python scriptjuegos.py
+
 # Mantener el contenedor activo después de ejecutar los scripts
 tail -f /dev/null

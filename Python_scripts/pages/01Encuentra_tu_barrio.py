@@ -116,11 +116,24 @@ def filter_centers_within_barrios(centers_data, barrios_data, metro_data=None, f
         st.error(f"Error filtering educational centers: {e}")
         return centers_data
 
-def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_only, filtered_barrios_data, show_metro_stations, selected_school_types):
+def filter_zonas_infantiles_within_barrios(zonas_data, barrios_data):
+    try:
+        combined_barrios_geometry = barrios_data.unary_union
+        zonas_data = zonas_data[zonas_data.geometry.notnull()]
+        zonas_data = zonas_data[zonas_data.geometry.is_valid]
+
+        zonas_in_barrios = zonas_data[zonas_data.geometry.within(combined_barrios_geometry)]
+        return zonas_in_barrios
+    except Exception as e:
+        st.error(f"Error filtering zonas infantiles: {e}")
+        return zonas_data
+    
+def create_map(metro_data, barrios_data, centros_data, zonas_infantiles_data, filter_metro_stations_only, filtered_barrios_data, show_metro_stations, selected_school_types, show_zonas_infantiles):
     m = folium.Map(location=[39.4699, -0.3763], zoom_start=12)
     metro_color = 'red'
     selected_color = 'green'
     school_colors = {'publico': 'purple', 'concertado': 'orange', 'privado': 'blue'}
+    zonas_color= 'yellow'
 
     normalized_selected_types = [normalize_text(st) for st in selected_school_types]
 
@@ -141,6 +154,11 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
     if show_metro_stations:
         legend_template += """
         <li><span style='background: red; border-radius: 50%;'></span>Paradas de metro</li>
+        """
+
+    if show_zonas_infantiles:
+        legend_template += """
+        <li><span style='background: yellow; border-radius: 50%;'></span>Zonas Infantiles</li>
         """
 
     for school_type in selected_school_types:
@@ -239,6 +257,20 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
                     fillColor=school_colors.get(row['regimen_normalized'], 'gray')
                 ).add_to(m)
 
+    if show_zonas_infantiles and zonas_infantiles_data is not None and not zonas_infantiles_data.empty:
+        for _, row in zonas_infantiles_data.iterrows():
+            point = row.geometry
+            if point.is_empty:
+                continue
+            folium.CircleMarker(
+                location=[point.y, point.x],
+                radius=5,
+                popup=row.get("jardin", "Zona Infantil"),
+                color=zonas_color,
+                fill=True,
+                fillColor=zonas_color
+            ).add_to(m)
+
     filtered_barrios_data = filtered_barrios_data[filtered_barrios_data.geometry.notnull()]
     for _, row in filtered_barrios_data.iterrows():
         geometry = row.geometry
@@ -259,21 +291,31 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
     return m
 
 def save_demanda(barrios, email, nombre, apellidos, transaction_type):
+    """
+    Guarda los datos de la demanda en la tabla 'demanda' en la base de datos.
+    """
     try:
         with get_connection() as conn:
-            # Insert data
-            for b in barrios:
-                conn.execute(
-                    text("INSERT INTO demanda (barrio, email, nombre, apellidos, tipo_transaccion) VALUES (:barrio, :email, :nombre, :apellidos, :tipo_transaccion)"),
-                    {"barrio": b, "email": email, "nombre": nombre, "apellidos": apellidos, "tipo_transaccion": transaction_type}
-                )
+            for barrio in barrios:
+                query = text("""
+                    INSERT INTO demanda (barrio, email, nombre, apellidos, tipo_transaccion, timestamp)
+                    VALUES (:barrio, :email, :nombre, :apellidos, :tipo_transaccion, NOW())
+                """)
+                conn.execute(query, {
+                    "barrio": barrio,
+                    "email": email,
+                    "nombre": nombre,
+                    "apellidos": apellidos,
+                    "tipo_transaccion": transaction_type
+                })
             conn.commit()
     except Exception as e:
-        st.error(f"Error saving demand data: {e}")
+        st.error(f"Error al guardar los datos en la tabla 'demanda': {e}")
 
 def reset_session():
     for key in st.session_state.keys():
         del st.session_state[key]
+
 
 def main():
     st.set_page_config(
@@ -314,13 +356,13 @@ def main():
             barrios_data = fetch_data("barrios_valencia")
             centros_data = fetch_data("centros_educativos")
             precios_data = fetch_data("precios_barrios")
+            zonas_infantiles_data = fetch_data("zonas_infantiles")  
 
         if metro_data is None or barrios_data is None or centros_data is None or precios_data is None:
             st.error("No se pudieron obtener los datos geográficos. Verifica la conexión con la base de datos.")
         else:
             st.sidebar.subheader("Filtros de Barrios:")
             
-            # Transaction type selection
             transaction_type = st.sidebar.radio(
                 "¿Buscas comprar o alquilar?",
                 ("Alquilar", "Comprar")
@@ -335,7 +377,6 @@ def main():
 
             security_value = st.sidebar.slider("Nivel mínimo de seguridad (0 a 3):", 0, 3, 0)
 
-            # Price Category Filter based on transaction type
             if transaction_type == "Alquilar":
                 price_options = {
                     "Todos": 0,
@@ -343,7 +384,7 @@ def main():
                     "Medio (800€ - 1100€/mes)": 2,
                     "Alto (>1100€/mes)": 3
                 }
-            else:  # Comprar
+            else:
                 price_options = {
                     "Todos": 0,
                     "Económico (150k€ - 200k€)": 1,
@@ -369,6 +410,10 @@ def main():
                     ['publico', 'concertado', 'privado'],
                     default=['publico', 'concertado', 'privado']
                 )
+            
+            need_zonas_infantiles = st.sidebar.radio("¿Necesitas zonas infantiles?", ("No", "Sí"))
+
+            show_zonas_infantiles = need_zonas_infantiles == "Sí"
 
             if "show_results" not in st.session_state:
                 st.session_state.show_results = False
@@ -376,7 +421,6 @@ def main():
             if st.button("Aplicar filtros"):
                 filtered_barrios_data = barrios_data[barrios_data['criminalidad'] >= security_value]
 
-                # Price Filtering Logic
                 if price_category != "Todos":
                     price_map = price_options
                     selected_price_category = price_map[price_category]
@@ -415,81 +459,67 @@ def main():
                 else:
                     centros_data_filtered = pd.DataFrame(columns=centros_data.columns)
 
+                if show_zonas_infantiles:
+                    zonas_infantiles_filtered = filter_zonas_infantiles_within_barrios(
+                        zonas_infantiles_data, filtered_barrios_data
+                    )
+                else:
+                    zonas_infantiles_filtered = gpd.GeoDataFrame(columns=zonas_infantiles_data.columns)
+
                 st.session_state.filtered_barrios_data = filtered_barrios_data
                 st.session_state.metro_data_filtered = metro_data_filtered
                 st.session_state.centros_data_filtered = centros_data_filtered
+                st.session_state.zonas_infantiles_filtered = zonas_infantiles_filtered
                 st.session_state.show_results = True
 
-                # Save to demand table
+                # Guardar en la tabla 'demanda'
                 if 'nombre' in filtered_barrios_data.columns:
                     barrios_optimos = filtered_barrios_data['nombre'].unique().tolist()
-                else:
-                    barrios_optimos = []
-                
-                if barrios_optimos:
                     save_demanda(
-                        barrios_optimos, 
-                        st.session_state.email, 
-                        st.session_state.nombre, 
+                        barrios_optimos,
+                        st.session_state.email,
+                        st.session_state.nombre,
                         st.session_state.apellidos,
                         transaction_type
                     )
-                    st.success("Datos guardados en la tabla 'demanda'.")
-                else:
-                    st.warning("No hay barrios que cumplan las condiciones para guardar en demanda.")
+                    st.success("Los datos se han guardado en la tabla 'demanda'.")
 
             if st.session_state.show_results:
-                filtered_barrios_data = st.session_state.filtered_barrios_data
-                metro_data_filtered = st.session_state.metro_data_filtered
-                centros_data_filtered = st.session_state.centros_data_filtered
-
                 st.subheader("Mapa Interactivo")
                 m = create_map(
-                    metro_data_filtered, 
+                    st.session_state.metro_data_filtered, 
                     barrios_data, 
-                    centros_data_filtered, 
+                    st.session_state.centros_data_filtered,
+                    st.session_state.zonas_infantiles_filtered, 
                     filter_metro_stations_only, 
-                    filtered_barrios_data, 
+                    st.session_state.filtered_barrios_data, 
                     show_metro_stations, 
-                    selected_school_types
+                    selected_school_types,
+                    show_zonas_infantiles
                 )
                 st_folium(m, width=900, height=600)
 
                 st.subheader("Detalles de los Barrios")
-                if not filtered_barrios_data.empty:
-                    filtered_barrios_display = filtered_barrios_data.drop(columns=['geometry'], errors='ignore')
-                    st.dataframe(filtered_barrios_display)
-                else:
-                    st.write("No hay barrios que cumplan las condiciones.")
+                filtered_display = st.session_state.filtered_barrios_data.drop(columns=['geometry', 'geo_shape'], errors='ignore')
+                st.dataframe(filtered_display)
 
                 st.subheader("Paradas de Metro Filtradas")
-                if not metro_data_filtered.empty:
-                    metro_display = metro_data_filtered.drop(columns=['geometry'], errors='ignore')
-                    st.dataframe(metro_display)
-                else:
-                    st.write("No hay paradas de metro en los barrios seleccionados.")
+                metro_display = st.session_state.metro_data_filtered.drop(columns=['geometry', 'geo_point_2d'], errors='ignore')
+                st.dataframe(metro_display)
 
                 if need_educational_centers == "Sí":
                     st.subheader("Centros Educativos Filtrados")
-    
-                    if not centros_data_filtered.empty:
+                    if not st.session_state.centros_data_filtered.empty:
                         columnas_a_mostrar = ['nombre', 'regimen', 'direccion', 'mail', 'telef', 'dgenerica_', 'despecific']
-                        columnas_presentes = [col for col in columnas_a_mostrar if col in centros_data_filtered.columns]
-        
-                        if columnas_presentes:
-                            st.dataframe(centros_data_filtered[columnas_presentes])
-                        else:
-                            st.warning(f"No se encuentran todas las columnas requeridas: {columnas_a_mostrar}")
+                        columnas_presentes = [col for col in columnas_a_mostrar if col in st.session_state.centros_data_filtered.columns]
+                        st.dataframe(st.session_state.centros_data_filtered[columnas_presentes])
                     else:
                         st.info("No hay centros educativos disponibles para mostrar.")
-                        
-                if price_category != "Todos":
-                    st.subheader("Información de Precios")
-                    if not filtered_barrios_data.empty:
-                        price_info = filtered_barrios_data[['nombre', 'precio_2022', 'categoria_precio']].drop_duplicates()
-                        st.dataframe(price_info)
-                    else:
-                        st.write("No hay información de precios disponible para los barrios seleccionados.")
+
+                if show_zonas_infantiles:
+                    st.subheader("Zonas Infantiles Filtradas")
+                    zonas_display = st.session_state.zonas_infantiles_filtered.drop(columns=['geometry', 'geo_shape', 'geo_point_2d'], errors='ignore')
+                    st.dataframe(zonas_display)
 
 if __name__ == "__main__":
     main()
