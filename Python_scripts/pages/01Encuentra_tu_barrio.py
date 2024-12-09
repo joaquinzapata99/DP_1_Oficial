@@ -11,7 +11,7 @@ from branca.element import Template, MacroElement
 
 # Enhanced Database Configuration
 DB_CONFIG = {
-    "host": "postgres_container",
+    "host": "postgres",
     "port": 5432,
     "database": "postgres",
     "user": "postgres",
@@ -124,7 +124,6 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
 
     normalized_selected_types = [normalize_text(st) for st in selected_school_types]
 
-    # Create legend template with updated styling
     legend_template = """
     {% macro html(this, kwargs) %}
     <div id='maplegend' class='maplegend' 
@@ -198,13 +197,11 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
     {% endmacro %}
     """
 
-    # Create MacroElement and add to map
     macro = MacroElement()
     macro._name = "legend"
     macro._template = Template(legend_template)
     m.get_root().add_child(macro)
 
-    # Add map features
     if show_metro_stations:
         filtered_metro = metro_data[
             metro_data.geometry.apply(
@@ -264,24 +261,11 @@ def create_map(metro_data, barrios_data, centros_data, filter_metro_stations_onl
 def save_demanda(barrios, email, nombre, apellidos, transaction_type):
     try:
         with get_connection() as conn:
-            # Create table if it doesn't exist
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS demanda (
-                    id SERIAL PRIMARY KEY,
-                    email VARCHAR(255),
-                    nombre VARCHAR(255),
-                    apellidos VARCHAR(255),
-                    barrio VARCHAR(255),
-                    tipo_transaccion VARCHAR(50),
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-
             # Insert data
             for b in barrios:
                 conn.execute(
-                    text("INSERT INTO demanda (email, nombre, apellidos, barrio, tipo_transaccion) VALUES (:email, :nombre, :apellidos, :barrio, :tipo_transaccion)"),
-                    {"email": email, "nombre": nombre, "apellidos": apellidos, "barrio": b, "tipo_transaccion": transaction_type}
+                    text("INSERT INTO demanda (barrio, email, nombre, apellidos, tipo_transaccion) VALUES (:barrio, :email, :nombre, :apellidos, :tipo_transaccion)"),
+                    {"barrio": b, "email": email, "nombre": nombre, "apellidos": apellidos, "tipo_transaccion": transaction_type}
                 )
             conn.commit()
     except Exception as e:
@@ -308,7 +292,6 @@ def main():
     st.title("Haz match con tu nuevo hogar 🌇")
 
     if st.session_state.step == 1:
-        # Paso 1: Solicitar datos del usuario
         st.header("Introduce tus datos")
         email = st.text_input("Email:")
         nombre = st.text_input("Nombre:")
@@ -324,7 +307,6 @@ def main():
                 st.warning("Por favor, rellena todos los campos antes de continuar.")
 
     elif st.session_state.step == 2:
-        # Paso 2: Aplicar filtros
         st.header(f"Hola {st.session_state.nombre}, personaliza tu mapa:")
 
         with st.spinner('Cargando datos geográficos...'):
@@ -375,7 +357,11 @@ def main():
                 help="Filtra barrios según su categoría de precio"
             )
 
-            need_educational_centers = st.sidebar.radio("¿Quieres filtrar por centros educativos?", ("No", "Sí"))
+            need_educational_centers = st.sidebar.radio(
+                "¿Quieres filtrar por centros educativos?", 
+                ("No", "Sí")
+            )
+            
             selected_school_types = []
             if need_educational_centers == "Sí":
                 selected_school_types = st.sidebar.multiselect(
@@ -392,20 +378,8 @@ def main():
 
                 # Price Filtering Logic
                 if price_category != "Todos":
-                    if transaction_type == "Alquilar":
-                        price_map = {
-                            "Económico (600€ - 800€/mes)": 1,
-                            "Medio (800€ - 1100€/mes)": 2,
-                            "Alto (>1100€/mes)": 3
-                        }
-                    else:  # Comprar
-                        price_map = {
-                            "Económico (150k€ - 200k€)": 1,
-                            "Medio (200k€ - 300k€)": 2,
-                            "Alto (>300k€)": 3
-                        }
-                    
-                    selected_price_category = price_map.get(price_category)
+                    price_map = price_options
+                    selected_price_category = price_map[price_category]
                     
                     price_merged = filtered_barrios_data.merge(
                         precios_data, 
@@ -446,7 +420,7 @@ def main():
                 st.session_state.centros_data_filtered = centros_data_filtered
                 st.session_state.show_results = True
 
-                # Save to demand table with transaction type
+                # Save to demand table
                 if 'nombre' in filtered_barrios_data.columns:
                     barrios_optimos = filtered_barrios_data['nombre'].unique().tolist()
                 else:
@@ -512,13 +486,7 @@ def main():
                 if price_category != "Todos":
                     st.subheader("Información de Precios")
                     if not filtered_barrios_data.empty:
-                        if transaction_type == "Alquilar":
-                            price_label = "Precio de Alquiler"
-                        else:
-                            price_label = "Precio de Venta"
-                            
                         price_info = filtered_barrios_data[['nombre', 'precio_2022', 'categoria_precio']].drop_duplicates()
-                        price_info.columns = ['Barrio', price_label, 'Categoría']
                         st.dataframe(price_info)
                     else:
                         st.write("No hay información de precios disponible para los barrios seleccionados.")
