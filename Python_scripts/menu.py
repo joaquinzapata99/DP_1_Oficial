@@ -39,7 +39,6 @@ st.markdown("""
 ### 🏠 **2. Ofrece tu Vivienda en Alquiler**  
 ¿Tienes una propiedad que quieres poner en alquiler? ¡Hazlo fácil con Tindrahood!  
 En esta sección, podrás describir todas las características de tu vivienda para hacerla irresistible a posibles inquilinos:  
-- **Sube fotos de tu vivienda** 📸  
 - **Especifica detalles importantes** (número de habitaciones, baños, metros cuadrados, etc.) 📐  
 - **Describe los servicios adicionales** (piscina, terraza, garaje, etc.) 🌴🚗  
 
