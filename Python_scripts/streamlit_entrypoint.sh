@@ -9,4 +9,4 @@ sleep 40
 
 # Run Streamlit
 echo "Starting Streamlit application..."
-streamlit run menu.py --server.port 8501 --server.address 0.0.0.0
+streamlit run Bienvenido.py --server.port 8501 --server.address 0.0.0.0
