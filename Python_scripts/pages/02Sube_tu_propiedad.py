@@ -35,6 +35,39 @@ def create_sqlalchemy_engine():
     connection_string = f"postgresql+pg8000://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
     return create_engine(connection_string)
 
+def check_table_exists(conn, table_name):
+    """
+    Verifica si la tabla existe en la base de datos.
+    """
+    try:
+        result = conn.execute(text(f"SELECT to_regclass('{table_name}');"))
+        table_exists = result.scalar() is not None
+        return table_exists
+    except Exception as e:
+        st.error(f"Error verificando la existencia de la tabla '{table_name}': {e}")
+        return False
+
+def load_properties_from_db(conn, table_name):
+    """
+    Carga los registros de la base de datos y los devuelve como un DataFrame.
+    Si la tabla no existe o está vacía, se devuelve un DataFrame vacío.
+    """
+    try:
+        if check_table_exists(conn, table_name):
+            query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC;"
+            df = pd.read_sql(query, conn)
+            if not df.empty:
+                return df
+            else:
+                st.info(f"La tabla '{table_name}' existe, pero no tiene registros.")
+                return pd.DataFrame()
+        else:
+            st.info(f"La tabla '{table_name}' no existe.")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error al cargar los datos de la tabla '{table_name}': {e}")
+        return pd.DataFrame()
+
 def save_property_to_db(property_data, table_name):
     """
     Guarda la descripción de una propiedad en la base de datos en la tabla especificada.
@@ -60,7 +93,7 @@ def save_property_to_db(property_data, table_name):
                 );
             """))
 
-            # Insertar datos
+            # Insertar los datos de la propiedad
             insert_query = text(f"""
                 INSERT INTO {table_name} (
                     barrio, direccion, numero_calle, metros_cuadrados, habitaciones,
@@ -74,7 +107,7 @@ def save_property_to_db(property_data, table_name):
             conn.commit()
             return True
     except Exception as e:
-        st.error(f"Error al guardar los datos: {e}")
+        st.error(f"Error al guardar los datos en la tabla '{table_name}': {e}")
         return False
 
 def main():
@@ -90,67 +123,48 @@ def main():
     st.title("Subida de Propiedades - Venta o Alquiler")
     st.write("Por favor, complete los datos del formulario para registrar una nueva propiedad.")
 
-    # Formulario de datos de la propiedad
     with st.form(key="property_form"):
         st.subheader("Detalles de la Propiedad")
 
         tipo_operacion = st.radio("¿Es una propiedad para venta o alquiler?", ["Venta", "Alquiler"])
-
-        # Desplegable de barrios
         barrio = st.selectbox("Barrio:", options=BARRIOS)
-
         direccion = st.text_input("Dirección:")
         numero_calle = st.text_input("Número de la Calle:")
         metros_cuadrados = st.number_input("Metros Cuadrados:", min_value=0.0, format="%.2f")
         habitaciones = st.number_input("Número de Habitaciones:", min_value=0, step=1)
         banos = st.number_input("Número de Baños:", min_value=0, step=1)
-        dependencias = st.text_area("Descripción de Otras Dependencias (ejemplo: balcón, terraza, etc.):")
-
+        dependencias = st.text_area("Descripción de Otras Dependencias:")
         ascensor = st.checkbox("El edificio dispone de ascensor")
         parking = st.checkbox("El edificio dispone de parking")
         precio = st.number_input("Precio (en euros):", min_value=0.0, format="%.2f")
 
-        # Botón para enviar los datos
         submit_button = st.form_submit_button(label="Subir Propiedad")
 
         if submit_button:
-            # Validación de campos obligatorios
-            if not barrio or not direccion or not numero_calle or metros_cuadrados <= 0 or habitaciones < 0 or banos < 0 or precio <= 0:
-                st.warning("Por favor, complete todos los campos obligatorios.")
-            else:
-                # Datos de la propiedad
-                property_data = {
-                    "barrio": barrio,
-                    "direccion": direccion,
-                    "numero_calle": numero_calle,
-                    "metros_cuadrados": metros_cuadrados,
-                    "habitaciones": habitaciones,
-                    "banos": banos,
-                    "dependencias": dependencias,
-                    "ascensor": ascensor,
-                    "parking": parking,
-                    "precio": precio,
-                }
-
-                # Selección de tabla según el tipo de operación
-                table_name = "propiedades_venta" if tipo_operacion == "Venta" else "propiedades_alquiler"
-
-                # Guardar los datos en la base de datos
-                success = save_property_to_db(property_data, table_name)
-                if success:
-                    st.success(f"¡Propiedad subida correctamente a la tabla '{table_name}'!")
-                else:
-                    st.error("Hubo un error al subir la propiedad. Inténtelo nuevamente.")
-
-    # Mostrar los datos guardados en la base de datos
+            property_data = {
+                "barrio": barrio,
+                "direccion": direccion,
+                "numero_calle": numero_calle,
+                "metros_cuadrados": metros_cuadrados,
+                "habitaciones": habitaciones,
+                "banos": banos,
+                "dependencias": dependencias,
+                "ascensor": ascensor,
+                "parking": parking,
+                "precio": precio,
+            }
+            table_name = "propiedades_venta" if tipo_operacion == "Venta" else "propiedades_alquiler"
+            success = save_property_to_db(property_data, table_name)
+            if success:
+                st.success(f"¡Propiedad subida correctamente a la tabla '{table_name}'!")
+                
     st.subheader("Propiedades Registradas")
     try:
         engine = create_sqlalchemy_engine()
         with engine.connect() as conn:
             # Mostrar propiedades para venta
             st.subheader("Propiedades para Venta")
-            venta_query = "SELECT * FROM propiedades_venta ORDER BY timestamp DESC;"
-            venta_df = pd.read_sql(venta_query, conn)
+            venta_df = load_properties_from_db(conn, "propiedades_venta")
             if not venta_df.empty:
                 st.dataframe(venta_df)
             else:
@@ -158,8 +172,7 @@ def main():
 
             # Mostrar propiedades para alquiler
             st.subheader("Propiedades para Alquiler")
-            alquiler_query = "SELECT * FROM propiedades_alquiler ORDER BY timestamp DESC;"
-            alquiler_df = pd.read_sql(alquiler_query, conn)
+            alquiler_df = load_properties_from_db(conn, "propiedades_alquiler")
             if not alquiler_df.empty:
                 st.dataframe(alquiler_df)
             else:
