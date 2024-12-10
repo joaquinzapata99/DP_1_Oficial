@@ -47,7 +47,7 @@ services:
     container_name: streamlit-app
     # Create a new entrypoint script for Streamlit
     volumes:
-      - ./menu.py:/app/menu.py
+      - ./Bienvenido.py:/app/Bienvenido.py
       - ./pages:/app/pages
       - ./streamlit_entrypoint.sh:/app/streamlit_entrypoint.sh
     entrypoint: ["/bin/sh", "/app/streamlit_entrypoint.sh"]
